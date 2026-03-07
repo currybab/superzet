@@ -449,6 +449,42 @@ impl SuperzetStore {
         Some(removed)
     }
 
+    pub fn remove_project(
+        &mut self,
+        project_id: &str,
+        cx: &mut Context<Self>,
+    ) -> Option<(ProjectEntry, Vec<WorkspaceEntry>)> {
+        let project_index = self
+            .state
+            .projects
+            .iter()
+            .position(|project| project.id == project_id)?;
+        let removed_project = self.state.projects.remove(project_index);
+
+        let mut removed_workspaces = Vec::new();
+        let mut remaining_workspaces = Vec::with_capacity(self.state.workspaces.len());
+        for workspace in std::mem::take(&mut self.state.workspaces) {
+            if workspace.project_id == project_id {
+                removed_workspaces.push(workspace);
+            } else {
+                remaining_workspaces.push(workspace);
+            }
+        }
+        self.state.workspaces = remaining_workspaces;
+
+        let removed_workspace_ids = removed_workspaces
+            .iter()
+            .map(|workspace| workspace.id.as_str())
+            .collect::<BTreeSet<_>>();
+        self.state
+            .sessions
+            .retain(|session| !removed_workspace_ids.contains(session.workspace_id.as_str()));
+
+        self.normalize();
+        self.persist_and_notify(cx);
+        Some((removed_project, removed_workspaces))
+    }
+
     pub fn reorder_workspace(
         &mut self,
         dragged_workspace_id: &str,

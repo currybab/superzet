@@ -4,12 +4,12 @@ use git_ui::git_panel::GitPanel;
 use gpui::{
     App, AsyncWindowContext, ClickEvent, Context, DismissEvent, Entity, EntityId, EventEmitter,
     FocusHandle, Focusable, InteractiveElement, MouseButton, MouseDownEvent, PathPromptOptions,
-    Pixels, Point, PromptLevel, Render, Subscription, Task, WeakEntity, actions, anchored,
-    deferred, prelude::FluentBuilder, px,
+    Pixels, Point, PromptLevel, Render, Subscription, Task, WeakEntity, WindowHandle, actions,
+    anchored, deferred, prelude::FluentBuilder, px,
 };
 use menu;
 use project_panel::ProjectPanel;
-use std::sync::Arc;
+use std::{collections::BTreeSet, path::PathBuf, sync::Arc};
 use superzet_model::{ProjectEntry, SuperzetStore, WorkspaceEntry, WorkspaceKind};
 use ui::{
     Button, Chip, Color, ContextMenu, Icon, IconButton, IconName, Label, ListItem, Tab,
@@ -17,7 +17,7 @@ use ui::{
 };
 use workspace::{
     AppState as WorkspaceAppState, MultiWorkspace, MultiWorkspaceEvent, OpenOptions, OpenVisible,
-    Pane, Sidebar as WorkspaceSidebar, SidebarEvent, Toast, Workspace,
+    Pane, Sidebar as WorkspaceSidebar, SidebarEvent, Toast, Workspace, local_workspace_windows,
     dock::{DockPosition, Panel, PanelEvent},
     notifications::NotificationId,
 };
@@ -386,6 +386,57 @@ impl SuperzetSidebar {
         cx.notify();
     }
 
+    fn deploy_project_context_menu(
+        &mut self,
+        position: Point<Pixels>,
+        project: ProjectEntry,
+        window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) {
+        let entity = cx.entity();
+        let context_menu = ContextMenu::build(window, cx, move |menu, _, _| {
+            menu.entry("Close Project", None, {
+                let entity = entity.clone();
+                let project_id = project.id.clone();
+                move |window, cx| {
+                    entity.update(cx, |this, cx| {
+                        this.close_project(&project_id, window, cx);
+                    });
+                }
+            })
+        });
+
+        window.focus(&context_menu.focus_handle(cx), cx);
+        let subscription = cx.subscribe_in(
+            &context_menu,
+            window,
+            |this, _, _: &DismissEvent, window, cx| {
+                if this.context_menu.as_ref().is_some_and(|context_menu| {
+                    context_menu.0.focus_handle(cx).contains_focused(window, cx)
+                }) {
+                    cx.focus_self(window);
+                }
+                this.context_menu.take();
+                cx.notify();
+            },
+        );
+
+        self.context_menu = Some((context_menu, position, subscription));
+        cx.notify();
+    }
+
+    fn close_project(
+        &mut self,
+        project_id: &str,
+        window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(current_workspace) = self.current_workspace_entity(cx) else {
+            return;
+        };
+        run_close_project_from_store(current_workspace, project_id.to_string(), window, cx);
+    }
+
     fn render_project_drop_zone(
         &self,
         target_project_id: Option<&str>,
@@ -532,6 +583,17 @@ impl SuperzetSidebar {
                                         ),
                                     ),
                             )
+                            .on_secondary_mouse_down(cx.listener({
+                                let project = project.clone();
+                                move |this, event: &MouseDownEvent, window, cx| {
+                                    this.deploy_project_context_menu(
+                                        event.position,
+                                        project.clone(),
+                                        window,
+                                        cx,
+                                    );
+                                }
+                            }))
                             .on_click(cx.listener({
                                 let project_id = project.id.clone();
                                 move |this, _: &ClickEvent, _, cx| {
@@ -1752,6 +1814,260 @@ fn run_delete_workspace(
     .detach_and_log_err(cx);
 }
 
+fn run_close_project(
+    workspace: &mut Workspace,
+    project_id: &str,
+    window: &mut gpui::Window,
+    cx: &mut Context<Workspace>,
+) {
+    let store = SuperzetStore::global(cx);
+    let Some(project) = store.read(cx).project(project_id).cloned() else {
+        workspace.show_toast(
+            Toast::new(
+                NotificationId::unique::<SuperzetSidebar>(),
+                "Missing project metadata.",
+            ),
+            cx,
+        );
+        return;
+    };
+
+    let project_workspaces = store
+        .read(cx)
+        .workspaces_for_project(project_id)
+        .into_iter()
+        .cloned()
+        .collect::<Vec<_>>();
+    let workspace_count = project_workspaces.len();
+    let fallback_workspace_path = store.read(cx).workspaces().iter().find_map(|workspace_entry| {
+        (workspace_entry.project_id != project_id).then(|| workspace_entry.worktree_path.clone())
+    });
+    let project_workspace_paths = project_workspaces
+        .iter()
+        .map(|workspace_entry| workspace_entry.worktree_path.clone())
+        .collect::<BTreeSet<_>>();
+    let prompt = window.prompt(
+        PromptLevel::Warning,
+        "Close project?",
+        Some(&format!(
+            "Close `{}` and remove its {} from superzet?\n\nFiles, worktrees, and git history will remain on disk.",
+            project.name,
+            project_workspace_label(workspace_count),
+        )),
+        &["Cancel", "Close Project"],
+        cx,
+    );
+
+    let app_state = workspace.app_state().clone();
+    let invoking_window = window.window_handle().downcast::<MultiWorkspace>();
+    let current_workspace = cx.entity().downgrade();
+    let project_id = project.id.clone();
+    let project_name = project.name.clone();
+
+    cx.spawn_in(window, async move |_this, cx| {
+        if prompt.await != Ok(1) {
+            return anyhow::Ok(());
+        }
+
+        let close_result = close_project_in_all_windows(
+            project_workspace_paths,
+            fallback_workspace_path,
+            app_state,
+            cx,
+        )
+        .await;
+
+        match close_result {
+            Ok(()) => {
+                store.update(cx, |store, cx| {
+                    store.remove_project(&project_id, cx);
+                });
+                show_project_close_toast(
+                    invoking_window.clone(),
+                    current_workspace.clone(),
+                    format!("Closed {project_name}"),
+                    cx,
+                );
+            }
+            Err(error) => {
+                show_project_close_toast(
+                    invoking_window.clone(),
+                    current_workspace.clone(),
+                    format!("Failed to close project: {error}"),
+                    cx,
+                );
+            }
+        }
+
+        anyhow::Ok(())
+    })
+    .detach_and_log_err(cx);
+}
+
+async fn close_project_in_all_windows(
+    project_workspace_paths: BTreeSet<PathBuf>,
+    fallback_workspace_path: Option<PathBuf>,
+    app_state: Arc<WorkspaceAppState>,
+    cx: &mut gpui::AsyncApp,
+) -> anyhow::Result<()> {
+    let workspace_windows = cx.update(|cx| local_workspace_windows(cx));
+
+    for workspace_window in workspace_windows {
+        let matching_indexes = match workspace_window.update(cx, |multi_workspace, _, cx| {
+            matching_workspace_indexes(multi_workspace, &project_workspace_paths, cx)
+        }) {
+            Ok(matching_indexes) => matching_indexes,
+            Err(_) => continue,
+        };
+
+        if matching_indexes.is_empty() {
+            continue;
+        }
+
+        let workspace_count = match workspace_window.update(cx, |multi_workspace, _, _| {
+            multi_workspace.workspaces().len()
+        }) {
+            Ok(workspace_count) => workspace_count,
+            Err(_) => continue,
+        };
+
+        if matching_indexes.len() == workspace_count {
+            ensure_project_close_fallback(
+                workspace_window.clone(),
+                fallback_workspace_path.clone(),
+                app_state.clone(),
+                cx,
+            )
+            .await?;
+        }
+
+        let matching_indexes = match workspace_window.update(cx, |multi_workspace, _, cx| {
+            matching_workspace_indexes(multi_workspace, &project_workspace_paths, cx)
+        }) {
+            Ok(matching_indexes) => matching_indexes,
+            Err(_) => continue,
+        };
+
+        for index in matching_indexes.into_iter().rev() {
+            if workspace_window
+                .update(cx, |multi_workspace, window, cx| {
+                    multi_workspace.remove_workspace(index, window, cx);
+                })
+                .is_err()
+            {
+                break;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+async fn ensure_project_close_fallback(
+    workspace_window: WindowHandle<MultiWorkspace>,
+    fallback_workspace_path: Option<PathBuf>,
+    app_state: Arc<WorkspaceAppState>,
+    cx: &mut gpui::AsyncApp,
+) -> anyhow::Result<()> {
+    let window_exists = || cx.update(|cx| workspace_window.read(cx).is_ok());
+
+    if let Some(path) = fallback_workspace_path {
+        match cx
+            .update(|cx| {
+                Workspace::new_local(
+                    vec![path],
+                    app_state.clone(),
+                    Some(workspace_window.clone()),
+                    None,
+                    None,
+                    true,
+                    cx,
+                )
+            })
+            .await
+        {
+            Ok(_) => return Ok(()),
+            Err(_error) => {
+                if !window_exists() {
+                    return Ok(());
+                }
+            }
+        }
+    }
+
+    if !window_exists() {
+        return Ok(());
+    }
+
+    cx.update(|cx| {
+        Workspace::new_local(
+            vec![],
+            app_state,
+            Some(workspace_window),
+            None,
+            None,
+            true,
+            cx,
+        )
+    })
+    .await?;
+
+    Ok(())
+}
+
+fn matching_workspace_indexes(
+    multi_workspace: &MultiWorkspace,
+    project_workspace_paths: &BTreeSet<PathBuf>,
+    cx: &App,
+) -> Vec<usize> {
+    multi_workspace
+        .workspaces()
+        .iter()
+        .enumerate()
+        .filter_map(|(index, workspace_handle)| {
+            workspace_root_path(workspace_handle, cx)
+                .filter(|path| project_workspace_paths.contains(path))
+                .map(|_| index)
+        })
+        .collect()
+}
+
+fn show_project_close_toast(
+    invoking_window: Option<WindowHandle<MultiWorkspace>>,
+    current_workspace: WeakEntity<Workspace>,
+    message: String,
+    cx: &mut gpui::AsyncApp,
+) {
+    if let Some(window_handle) = invoking_window {
+        if window_handle
+            .update(cx, |multi_workspace, _, cx| {
+                let active_workspace = multi_workspace.workspace().clone();
+                active_workspace.update(cx, |workspace, cx| {
+                    workspace.show_toast(
+                        Toast::new(
+                            NotificationId::unique::<SuperzetSidebar>(),
+                            message.clone(),
+                        ),
+                        cx,
+                    );
+                });
+            })
+            .is_ok()
+        {
+            return;
+        }
+    }
+
+    if let Ok(()) = current_workspace.update(cx, |workspace, cx| {
+        workspace.show_toast(
+            Toast::new(NotificationId::unique::<SuperzetSidebar>(), message.clone()),
+            cx,
+        );
+    }) {
+        return;
+    }
+}
+
 fn run_delete_workspace_from_store(
     workspace_handle: Entity<Workspace>,
     window: &mut gpui::Window,
@@ -1759,6 +2075,17 @@ fn run_delete_workspace_from_store(
 ) {
     workspace_handle.update(cx, |workspace, cx| {
         run_delete_workspace(workspace, window, cx);
+    });
+}
+
+fn run_close_project_from_store(
+    workspace_handle: Entity<Workspace>,
+    project_id: String,
+    window: &mut gpui::Window,
+    cx: &mut App,
+) {
+    workspace_handle.update(cx, |workspace, cx| {
+        run_close_project(workspace, &project_id, window, cx);
     });
 }
 
