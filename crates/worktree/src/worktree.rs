@@ -3084,7 +3084,7 @@ impl BackgroundScannerState {
             .log_err();
         watcher
             .add(&repository_dir_abs_path)
-            .context("failed to add repository directory to watcher")
+            .context("failed to add project directory to watcher")
             .log_err();
 
         let work_directory_id = work_dir_entry.id;

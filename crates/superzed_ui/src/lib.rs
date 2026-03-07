@@ -12,13 +12,13 @@ use project_panel::ProjectPanel;
 use std::{collections::BTreeSet, path::PathBuf, sync::Arc};
 use superzet_model::{ProjectEntry, SuperzetStore, WorkspaceEntry, WorkspaceKind};
 use ui::{
-    Button, Chip, Color, ContextMenu, Icon, IconButton, IconName, Label, ListItem, Tab,
-    prelude::*,
+    Button, Chip, Color, ContextMenu, Icon, IconButton, IconName, Label, ListItem, Tab, prelude::*,
 };
 use workspace::{
     AppState as WorkspaceAppState, MultiWorkspace, MultiWorkspaceEvent, OpenOptions, OpenVisible,
-    Pane, Sidebar as WorkspaceSidebar, SidebarEvent, Toast, Workspace, local_workspace_windows,
+    Pane, Sidebar as WorkspaceSidebar, SidebarEvent, Toast, Workspace,
     dock::{DockPosition, Panel, PanelEvent},
+    local_workspace_windows,
     notifications::NotificationId,
 };
 
@@ -678,15 +678,12 @@ impl SuperzetSidebar {
                             .indent_level(1)
                             .spacing(ui::ListItemSpacing::Dense)
                             .rounded()
-                            .start_slot(
-                                h_flex()
-                                    .gap_1()
-                                    .items_center()
-                                    .child(Icon::new(match workspace.kind {
-                                        WorkspaceKind::Primary => IconName::Folder,
-                                        WorkspaceKind::Worktree => IconName::GitBranch,
-                                    })),
-                            )
+                            .start_slot(h_flex().gap_1().items_center().child(Icon::new(
+                                match workspace.kind {
+                                    WorkspaceKind::Primary => IconName::Folder,
+                                    WorkspaceKind::Worktree => IconName::GitBranch,
+                                },
+                            )))
                             .when(workspace.managed, |this| {
                                 this.end_hover_slot(
                                     IconButton::new(
@@ -761,7 +758,9 @@ impl SuperzetSidebar {
                                                     .w_full()
                                                     .gap_1()
                                                     .items_center()
-                                                    .child(self.render_workspace_title(workspace, cx))
+                                                    .child(
+                                                        self.render_workspace_title(workspace, cx),
+                                                    )
                                                     .child(div().flex_1()),
                                             )
                                             .child(
@@ -783,7 +782,7 @@ impl SuperzetSidebar {
                                         )
                                     }),
                             ),
-                    )
+                    ),
             )
     }
 
@@ -968,7 +967,7 @@ impl Render for SuperzetEmptyPaneView {
             EmptyPaneMode::Initial => vec![
                 self.action_button(
                     "superzet-empty-add-project",
-                    "Add Repository",
+                    "Add Project",
                     IconName::OpenFolder,
                     true,
                     |_, window, cx| add_project_from_window(window, cx),
@@ -1140,7 +1139,7 @@ impl Render for SuperzetSidebar {
                             .px_2()
                             .py_2()
                             .child(
-                                Button::new("superzet-sidebar-add-project", "Add Repository")
+                                Button::new("superzet-sidebar-add-project", "Add Project")
                                     .full_width()
                                     .style(ui::ButtonStyle::Subtle)
                                     .icon(IconName::FolderOpen)
@@ -1839,9 +1838,14 @@ fn run_close_project(
         .cloned()
         .collect::<Vec<_>>();
     let workspace_count = project_workspaces.len();
-    let fallback_workspace_path = store.read(cx).workspaces().iter().find_map(|workspace_entry| {
-        (workspace_entry.project_id != project_id).then(|| workspace_entry.worktree_path.clone())
-    });
+    let fallback_workspace_path = store
+        .read(cx)
+        .workspaces()
+        .iter()
+        .find_map(|workspace_entry| {
+            (workspace_entry.project_id != project_id)
+                .then(|| workspace_entry.worktree_path.clone())
+        });
     let project_workspace_paths = project_workspaces
         .iter()
         .map(|workspace_entry| workspace_entry.worktree_path.clone())
@@ -2044,10 +2048,7 @@ fn show_project_close_toast(
                 let active_workspace = multi_workspace.workspace().clone();
                 active_workspace.update(cx, |workspace, cx| {
                     workspace.show_toast(
-                        Toast::new(
-                            NotificationId::unique::<SuperzetSidebar>(),
-                            message.clone(),
-                        ),
+                        Toast::new(NotificationId::unique::<SuperzetSidebar>(), message.clone()),
                         cx,
                     );
                 });
@@ -2242,5 +2243,8 @@ fn workspace_sidebar_title(workspace: &WorkspaceEntry) -> String {
 }
 
 fn workspace_has_display_alias(workspace: &WorkspaceEntry) -> bool {
-    workspace.display_name.as_deref().is_some_and(|name| !name.trim().is_empty())
+    workspace
+        .display_name
+        .as_deref()
+        .is_some_and(|name| !name.trim().is_empty())
 }

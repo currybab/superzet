@@ -150,7 +150,7 @@ const CONTENT: (Section<4>, Section<3>) = (
             },
             SectionEntry {
                 icon: IconName::FolderOpen,
-                title: "Add Repository",
+                title: "Add Project",
                 action: &Open::DEFAULT,
             },
             SectionEntry {

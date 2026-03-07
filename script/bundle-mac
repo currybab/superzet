@@ -13,6 +13,17 @@ can_code_sign=false
 IDENTITY="Zed Industries, Inc."
 APPLE_NOTARIZATION_TEAM="MQ55VZLNZQ"
 
+if [[ -z "${CARGO_TARGET_DIR:-}" ]]; then
+    tmp_root="${TMPDIR:-/tmp}"
+    tmp_root="${tmp_root%/}"
+    repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+    repo_name="$(basename "$repo_root" | tr -cs 'A-Za-z0-9._-' '-')"
+    repo_name="${repo_name#-}"
+    repo_name="${repo_name%-}"
+    repo_hash="$(printf '%s' "$repo_root" | shasum | awk '{print substr($1, 1, 12)}')"
+    export CARGO_TARGET_DIR="${tmp_root}/superzet-targets/${repo_name}-${repo_hash}"
+fi
+
 # Function for displaying help info
 help_info() {
   echo "
@@ -50,8 +61,9 @@ shift $((OPTIND-1))
 
 # Get release channel
 pushd crates/zed
-channel=$(<RELEASE_CHANNEL)
+channel="${ZED_RELEASE_CHANNEL:-$(<RELEASE_CHANNEL)}"
 export ZED_RELEASE_CHANNEL="${channel}"
+export RELEASE_CHANNEL="${channel}"
 popd
 
 export ZED_BUNDLE=true
@@ -203,7 +215,7 @@ function sign_app_binaries() {
         # sequence of codesign commands modeled after this example: https://developer.apple.com/forums/thread/701514
         /usr/bin/codesign --deep --force --timestamp --options runtime --sign "$IDENTITY" "${app_path}/Contents/MacOS/cli" -v
         /usr/bin/codesign --deep --force --timestamp --options runtime --sign "$IDENTITY" "${app_path}/Contents/MacOS/git" -v
-        /usr/bin/codesign --deep --force --timestamp --options runtime --entitlements crates/zed/resources/zed.entitlements --sign "$IDENTITY" "${app_path}/Contents/MacOS/zed" -v
+        /usr/bin/codesign --deep --force --timestamp --options runtime --entitlements crates/zed/resources/zed.entitlements --sign "$IDENTITY" "${app_path}/Contents/MacOS/superzet" -v
         /usr/bin/codesign --force --timestamp --options runtime --entitlements crates/zed/resources/zed.entitlements --sign "$IDENTITY" "${app_path}" -v
     else
         echo "One or more of the following variables are missing: MACOS_CERTIFICATE, MACOS_CERTIFICATE_PASSWORD, APPLE_NOTARIZATION_KEY, APPLE_NOTARIZATION_KEY_ID, APPLE_NOTARIZATION_ISSUER_ID"
@@ -243,7 +255,7 @@ function sign_app_binaries() {
             echo "$app_path"
         fi
     else
-        dmg_target_directory="target/${target_triple}/${target_dir}"
+        dmg_target_directory="${CARGO_TARGET_DIR}/${target_triple}/${target_dir}"
         dmg_source_directory="${dmg_target_directory}/dmg"
         dmg_file_path="${dmg_target_directory}/Zed-${arch_suffix}.dmg"
         xcode_bin_dir_path="$(xcode-select -p)/usr/bin"
@@ -297,15 +309,15 @@ function upload_debug_symbols() {
         echo "local install; skipping sentry upload."
     elif [[ -n "${SENTRY_AUTH_TOKEN:-}" ]]; then
         echo "Uploading zed debug symbols to sentry..."
-        exe_path="target/${target_triple}/release/Zed"
-        if ! dsymutil --flat "target/${target_triple}/${target_dir}/zed" 2> target/dsymutil.log; then
+        dsymutil_log="${CARGO_TARGET_DIR}/dsymutil.log"
+        if ! dsymutil --flat "${CARGO_TARGET_DIR}/${target_triple}/${target_dir}/superzet" 2> "${dsymutil_log}"; then
             echo "dsymutil failed"
-            cat target/dsymutil.log
+            cat "${dsymutil_log}"
             exit 1
         fi
-        if ! dsymutil --flat "target/${target_triple}/${target_dir}/remote_server" 2> target/dsymutil.log; then
+        if ! dsymutil --flat "${CARGO_TARGET_DIR}/${target_triple}/${target_dir}/remote_server" 2> "${dsymutil_log}"; then
             echo "dsymutil failed"
-            cat target/dsymutil.log
+            cat "${dsymutil_log}"
             exit 1
         fi
         # note: this uploads the unstripped binary which is needed because it contains
@@ -314,8 +326,8 @@ function upload_debug_symbols() {
         for attempt in 1 2 3; do
             echo "Sentry upload attempt $attempt..."
             if sentry-cli debug-files upload --include-sources --wait -p zed -o zed-dev \
-                "target/${target_triple}/${target_dir}/zed.dwarf" \
-                "target/${target_triple}/${target_dir}/remote_server.dwarf"; then
+                "${CARGO_TARGET_DIR}/${target_triple}/${target_dir}/superzet.dwarf" \
+                "${CARGO_TARGET_DIR}/${target_triple}/${target_dir}/remote_server.dwarf"; then
                 break
             else
                 echo "Sentry upload failed on attempt $attempt"
@@ -332,9 +344,11 @@ function upload_debug_symbols() {
 
 upload_debug_symbols
 
-cp target/${target_triple}/${target_dir}/zed "${app_path}/Contents/MacOS/zed"
-cp target/${target_triple}/${target_dir}/cli "${app_path}/Contents/MacOS/cli"
+cp "${CARGO_TARGET_DIR}/${target_triple}/${target_dir}/superzet" "${app_path}/Contents/MacOS/superzet"
+cp "${CARGO_TARGET_DIR}/${target_triple}/${target_dir}/cli" "${app_path}/Contents/MacOS/cli"
 sign_app_binaries
 
-sign_binary "target/$target_triple/release/remote_server"
-gzip -f --stdout --best target/$target_triple/release/remote_server > target/zed-remote-server-macos-$arch_suffix.gz
+if [[ "$target_dir" != "debug" ]]; then
+    sign_binary "${CARGO_TARGET_DIR}/${target_triple}/${target_dir}/remote_server"
+    gzip -f --stdout --best "${CARGO_TARGET_DIR}/${target_triple}/${target_dir}/remote_server" > "${CARGO_TARGET_DIR}/superzet-remote-server-macos-$arch_suffix.gz"
+fi

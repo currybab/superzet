@@ -15,6 +15,7 @@
 process.on("SIGINT", () => {});
 
 const { spawn, spawnSync } = require("child_process");
+const crypto = require("crypto");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -232,11 +233,57 @@ function getTargetDir(args) {
   return "target";
 }
 
+function repoRoot() {
+  try {
+    const result = spawnSync("git", ["rev-parse", "--show-toplevel"], {
+      encoding: "utf-8",
+      stdio: ["pipe", "pipe", "pipe"],
+      timeout: 5000,
+    });
+    if (result.status !== 0 || !result.stdout) {
+      return null;
+    }
+    return result.stdout.trim();
+  } catch {
+    return null;
+  }
+}
+
+function sanitizeName(value) {
+  return value.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "workspace";
+}
+
+function defaultWorktreeTargetDir() {
+  const root = repoRoot();
+  if (!root) {
+    return "target";
+  }
+
+  const hash = crypto.createHash("sha1").update(root).digest("hex").slice(0, 12);
+  const repoName = sanitizeName(path.basename(root));
+  return path.join(os.tmpdir(), "superzet-targets", `${repoName}-${hash}`);
+}
+
+function ensureReleaseChannelEnv(env) {
+  if (!env.RELEASE_CHANNEL && env.ZED_RELEASE_CHANNEL) {
+    env.RELEASE_CHANNEL = env.ZED_RELEASE_CHANNEL;
+  }
+  if (!env.ZED_RELEASE_CHANNEL && env.RELEASE_CHANNEL) {
+    env.ZED_RELEASE_CHANNEL = env.RELEASE_CHANNEL;
+  }
+}
+
 function runCargoPassthrough(args) {
   const cargoCmd = process.env.CARGO || "cargo";
+  const env = { ...process.env };
+  ensureReleaseChannelEnv(env);
+  if (!env.CARGO_TARGET_DIR && !args.some((arg) => arg === "--target-dir" || arg.startsWith("--target-dir="))) {
+    env.CARGO_TARGET_DIR = defaultWorktreeTargetDir();
+  }
   const result = spawnSync(cargoCmd, args, {
     stdio: "inherit",
     shell: false,
+    env,
   });
   process.exit(result.status ?? 1);
 }
@@ -261,6 +308,8 @@ async function main() {
   }
 
   const cargoCmd = process.env.CARGO || "cargo";
+  const env = { ...process.env };
+  ensureReleaseChannelEnv(env);
   const subcommandInfo = findSubcommand(args);
   const expandedSubcommand = subcommandInfo ? expandAlias(subcommandInfo.subcommand) : null;
   const shouldAddTimings = expandedSubcommand && SUBCOMMANDS_WITH_TIMINGS.has(expandedSubcommand);
@@ -276,10 +325,15 @@ async function main() {
     }
   }
 
+  if (!env.CARGO_TARGET_DIR && getTargetDir(args) === "target") {
+    env.CARGO_TARGET_DIR = defaultWorktreeTargetDir();
+  }
+
   // Run cargo asynchronously so we can handle signals properly
   const child = spawn(cargoCmd, finalArgs, {
     stdio: "inherit",
     shell: false,
+    env,
   });
 
   // Wait for the child to exit
@@ -291,7 +345,7 @@ async function main() {
 
   // If we added timings, try to process the timing file (regardless of cargo's exit status)
   if (shouldAddTimings) {
-    const targetDir = getTargetDir(args);
+    const targetDir = env.CARGO_TARGET_DIR || getTargetDir(args);
     const timingFile = findLatestTimingFile(targetDir);
 
     if (timingFile) {
