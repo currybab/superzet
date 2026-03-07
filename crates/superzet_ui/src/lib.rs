@@ -2,10 +2,9 @@ use anyhow::Result;
 use editor::{Editor, EditorEvent, actions::SelectAll};
 use git_ui::git_panel::GitPanel;
 use gpui::{
-    App, AsyncWindowContext, ClickEvent, Context, DismissEvent, Entity, EntityId, EventEmitter,
-    FocusHandle, Focusable, InteractiveElement, MouseButton, MouseDownEvent, PathPromptOptions,
-    Pixels, Point, PromptLevel, Render, Subscription, Task, WeakEntity, WindowHandle, actions,
-    anchored, deferred, prelude::FluentBuilder, px,
+    Action, AsyncWindowContext, ClickEvent, DismissEvent, Entity, EntityId, EventEmitter,
+    FocusHandle, Focusable, MouseButton, MouseDownEvent, PathPromptOptions, Point, PromptLevel,
+    Subscription, Task, WeakEntity, WindowHandle, actions, anchored, deferred,
 };
 use menu;
 use project_panel::ProjectPanel;
@@ -15,15 +14,8 @@ use superzet_model::{
 };
 use terminal_view::{TerminalView, terminal_panel::TerminalPanel};
 use ui::{
-    Action, AnyElement, App, AsyncWindowContext, Button, Chip, ClickEvent, Color, Context,
-    ContextMenu, DismissEvent, Entity, EntityId, EventEmitter, FocusHandle, Focusable, Icon,
-    IconButton, IconName, InteractiveElement, Label, ListItem, MouseButton, MouseDownEvent,
-    PathPromptOptions, Pixels, Point, PromptLevel, Render, SharedString, Subscription, Tab, Task,
-    WeakEntity, Window, actions, anchored, deferred, prelude::FluentBuilder, prelude::*, px,
-};
-use ui::{
-    Button, ButtonStyle, Chip, Color, ContextMenu, DropdownMenu, DropdownStyle, Icon, IconButton,
-    IconName, Label, ListItem, Switch, SwitchLabelPosition, Tab, ToggleState, Tooltip, prelude::*,
+    Chip, ContextMenu, DropdownMenu, DropdownStyle, ListItem, Switch, SwitchLabelPosition, Tab,
+    ToggleState, Tooltip, prelude::*,
 };
 use workspace::{
     AppState as WorkspaceAppState, ModalView, MultiWorkspace, MultiWorkspaceEvent, OpenOptions,

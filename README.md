@@ -31,8 +31,8 @@ Not in scope right now:
 ### macOS
 
 ```bash
-git clone git@github.com:nerdface-ai/superzed.git
-cd superzed
+git clone git@github.com:nerdface-ai/superzet.git
+cd superzet
 cargo run -p superzet
 ```
 

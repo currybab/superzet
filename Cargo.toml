@@ -183,10 +183,10 @@ members = [
     "crates/story",
     "crates/storybook",
     "crates/streaming_diff",
-    "crates/superzed_git",
-    "crates/superzed_agent",
-    "crates/superzed_model",
-    "crates/superzed_ui",
+    "crates/superzet_git",
+    "crates/superzet_agent",
+    "crates/superzet_model",
+    "crates/superzet_ui",
     "crates/sum_tree",
     "crates/svg_preview",
     "crates/system_specs",
@@ -431,10 +431,10 @@ sqlez = { path = "crates/sqlez" }
 sqlez_macros = { path = "crates/sqlez_macros" }
 story = { path = "crates/story" }
 streaming_diff = { path = "crates/streaming_diff" }
-superzet_git = { path = "crates/superzed_git" }
-superzet_agent = { path = "crates/superzed_agent" }
-superzet_model = { path = "crates/superzed_model" }
-superzet_ui = { path = "crates/superzed_ui" }
+superzet_git = { path = "crates/superzet_git" }
+superzet_agent = { path = "crates/superzet_agent" }
+superzet_model = { path = "crates/superzet_model" }
+superzet_ui = { path = "crates/superzet_ui" }
 sum_tree = { path = "crates/sum_tree" }
 codestral = { path = "crates/codestral" }
 system_specs = { path = "crates/system_specs" }

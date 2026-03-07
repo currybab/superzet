@@ -1158,7 +1158,7 @@ fn initialize_pane(
     window: &mut Window,
     cx: &mut Context<Workspace>,
 ) {
-    superzed_ui::install_pane_accessory(pane, cx);
+    superzet_ui::install_pane_accessory(pane, cx);
 
     let workspace_handle = cx.weak_entity();
     pane.update(cx, |pane, cx| {
