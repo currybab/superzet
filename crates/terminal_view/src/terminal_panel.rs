@@ -760,13 +760,7 @@ impl TerminalPanel {
                             cx,
                         )
                     }));
-                    workspace.add_item_to_active_pane(
-                        terminal_view,
-                        None,
-                        true,
-                        window,
-                        cx,
-                    );
+                    workspace.add_item_to_active_pane(terminal_view, None, true, window, cx);
                 }
             })?;
             Ok(terminal.downgrade())

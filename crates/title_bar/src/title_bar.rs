@@ -405,13 +405,15 @@ impl TitleBar {
                                 if let Some(workspace) = workspace.upgrade() {
                                     workspace.update(cx, |workspace, cx| {
                                         if workspace.right_dock().read(cx).is_open() {
-                                            workspace.close_panel::<superzet_ui::SuperzetRightSidebar>(
-                                                window, cx,
-                                            );
+                                            workspace
+                                                .close_panel::<superzet_ui::SuperzetRightSidebar>(
+                                                    window, cx,
+                                                );
                                         } else {
-                                            workspace.open_panel::<superzet_ui::SuperzetRightSidebar>(
-                                                window, cx,
-                                            );
+                                            workspace
+                                                .open_panel::<superzet_ui::SuperzetRightSidebar>(
+                                                    window, cx,
+                                                );
                                         }
                                     });
                                 }

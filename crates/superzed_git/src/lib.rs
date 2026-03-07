@@ -3,7 +3,7 @@ use chrono::Utc;
 use serde::Deserialize;
 use std::{
     fs,
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
     process::Command,
 };
 use superzet_model::{GitChangeSummary, ProjectEntry, WorkspaceEntry, WorkspaceKind};
@@ -27,12 +27,19 @@ pub struct WorkspaceRefresh {
     pub git_summary: Option<GitChangeSummary>,
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct CreateWorkspaceOptions {
+    pub run_setup: bool,
+}
+
 #[derive(Default, Deserialize)]
 struct SuperzetConfig {
     #[serde(default)]
     setup: Vec<String>,
     #[serde(default)]
     teardown: Vec<String>,
+    #[serde(default)]
+    copy: Vec<String>,
 }
 
 pub fn register_project(repo_hint: &Path, preset_id: &str) -> Result<ProjectRegistration> {
@@ -74,7 +81,11 @@ pub fn register_project(repo_hint: &Path, preset_id: &str) -> Result<ProjectRegi
     })
 }
 
-pub fn create_workspace(project: &ProjectEntry, preset_id: &str) -> Result<WorkspaceCreateOutcome> {
+pub fn create_workspace(
+    project: &ProjectEntry,
+    preset_id: &str,
+    options: CreateWorkspaceOptions,
+) -> Result<WorkspaceCreateOutcome> {
     ensure_clean_worktree(&project.repo_root)?;
 
     let repo_root = discover_repo_root(&project.repo_root)?;
@@ -104,13 +115,14 @@ pub fn create_workspace(project: &ProjectEntry, preset_id: &str) -> Result<Works
         ],
     )?;
 
-    let setup_result = run_repo_hooks(
-        &repo_root,
-        &worktree_path,
-        &workspace_name,
-        HookPhase::Setup,
-    );
-    let warning = setup_result.err().map(|error| format!("{error:#}"));
+    let warning =
+        match prepare_workspace_contents(&repo_root, &worktree_path, &workspace_name, &options) {
+            Ok(warnings) => (!warnings.is_empty()).then(|| warnings.join("\n")),
+            Err(error) => {
+                cleanup_worktree(&repo_root, &worktree_path);
+                return Err(error);
+            }
+        };
 
     let refresh = refresh_workspace_path(&worktree_path).unwrap_or(WorkspaceRefresh {
         branch: branch_name.clone(),
@@ -271,6 +283,43 @@ fn run_repo_hooks(
     Ok(())
 }
 
+fn prepare_workspace_contents(
+    repo_root: &Path,
+    worktree_path: &Path,
+    workspace_name: &str,
+    options: &CreateWorkspaceOptions,
+) -> Result<Vec<String>> {
+    let config = load_superzet_config(repo_root)?;
+    let mut warnings = Vec::new();
+
+    let superzet_source = repo_root.join(".superzet");
+    if superzet_source.exists() {
+        copy_repo_path(&superzet_source, &worktree_path.join(".superzet"))
+            .with_context(|| format!("failed to copy {}", superzet_source.display()))?;
+    }
+
+    for copy_entry in &config.copy {
+        let Some(source_path) = resolve_repo_relative_path(repo_root, copy_entry)? else {
+            warnings.push(format!("Skipped missing copy source `{copy_entry}`."));
+            continue;
+        };
+
+        let destination_path = worktree_path.join(copy_entry);
+        copy_repo_path(&source_path, &destination_path)
+            .with_context(|| format!("failed to copy {}", source_path.display()))?;
+    }
+
+    if options.run_setup {
+        if let Err(error) =
+            run_repo_hooks(repo_root, worktree_path, workspace_name, HookPhase::Setup)
+        {
+            warnings.push(format!("{error:#}"));
+        }
+    }
+
+    Ok(warnings)
+}
+
 fn load_superzet_config(repo_root: &Path) -> Result<SuperzetConfig> {
     let config_path = repo_root.join(".superzet").join("config.json");
     if !config_path.exists() {
@@ -281,6 +330,85 @@ fn load_superzet_config(repo_root: &Path) -> Result<SuperzetConfig> {
         .with_context(|| format!("failed to read {}", config_path.display()))?;
     serde_json::from_str(&contents)
         .with_context(|| format!("failed to parse {}", config_path.display()))
+}
+
+fn resolve_repo_relative_path(repo_root: &Path, relative_path: &str) -> Result<Option<PathBuf>> {
+    let relative_path = Path::new(relative_path);
+    if relative_path.is_absolute() {
+        bail!(
+            "copy path `{}` must be relative to the repository root",
+            relative_path.display()
+        );
+    }
+
+    for component in relative_path.components() {
+        match component {
+            Component::CurDir | Component::Normal(_) => {}
+            Component::ParentDir => {
+                bail!(
+                    "copy path `{}` cannot leave the repository root",
+                    relative_path.display()
+                )
+            }
+            Component::Prefix(_) | Component::RootDir => {
+                bail!(
+                    "copy path `{}` must be relative to the repository root",
+                    relative_path.display()
+                )
+            }
+        }
+    }
+
+    let source_path = repo_root.join(relative_path);
+    if !source_path.exists() {
+        return Ok(None);
+    }
+
+    Ok(Some(source_path))
+}
+
+fn copy_repo_path(source_path: &Path, destination_path: &Path) -> Result<()> {
+    let metadata = fs::symlink_metadata(source_path)
+        .with_context(|| format!("failed to read {}", source_path.display()))?;
+
+    if metadata.is_dir() {
+        fs::create_dir_all(destination_path)
+            .with_context(|| format!("failed to create {}", destination_path.display()))?;
+
+        for entry in fs::read_dir(source_path)
+            .with_context(|| format!("failed to read {}", source_path.display()))?
+        {
+            let entry = entry?;
+            copy_repo_path(&entry.path(), &destination_path.join(entry.file_name()))?;
+        }
+
+        return Ok(());
+    }
+
+    if let Some(parent_directory) = destination_path.parent() {
+        fs::create_dir_all(parent_directory)
+            .with_context(|| format!("failed to create {}", parent_directory.display()))?;
+    }
+
+    fs::copy(source_path, destination_path).with_context(|| {
+        format!(
+            "failed to copy {} to {}",
+            source_path.display(),
+            destination_path.display()
+        )
+    })?;
+
+    Ok(())
+}
+
+fn cleanup_worktree(repo_root: &Path, worktree_path: &Path) {
+    let worktree_path = worktree_path.to_string_lossy().to_string();
+    if let Err(error) = run_git(
+        repo_root,
+        &["worktree", "remove", "--force", &worktree_path],
+    ) {
+        log::error!("failed to clean up worktree {}: {error:#}", worktree_path);
+    }
 }
 
 fn run_shell_command(
@@ -382,7 +510,12 @@ mod tests {
         fs::write(repo.repo_path.join("dirty.txt"), "dirty\n").unwrap();
         let registration = register_project(&repo.repo_path, "codex").unwrap();
 
-        let error = create_workspace(&registration.project, "codex").unwrap_err();
+        let error = create_workspace(
+            &registration.project,
+            "codex",
+            CreateWorkspaceOptions { run_setup: true },
+        )
+        .unwrap_err();
 
         assert!(
             error
@@ -409,7 +542,12 @@ mod tests {
         );
 
         let registration = register_project(&worktree_path, "codex").unwrap();
-        let outcome = create_workspace(&registration.project, "codex").unwrap();
+        let outcome = create_workspace(
+            &registration.project,
+            "codex",
+            CreateWorkspaceOptions { run_setup: true },
+        )
+        .unwrap();
         let expected_root = repo
             .repo_path
             .parent()
@@ -419,6 +557,108 @@ mod tests {
 
         assert_eq!(registration.project.repo_root, repo.repo_path);
         assert!(outcome.workspace.worktree_path.starts_with(expected_root));
+
+        delete_workspace(&outcome.workspace, &registration.project.repo_root, true).unwrap();
+    }
+
+    #[test]
+    fn create_workspace_copies_superzet_directory_and_extra_paths() {
+        let repo = init_repo();
+        fs::create_dir_all(repo.repo_path.join(".superzet")).unwrap();
+        fs::write(
+            repo.repo_path.join(".superzet").join("config.json"),
+            r#"{"copy":["templates"]}"#,
+        )
+        .unwrap();
+        fs::write(
+            repo.repo_path.join(".superzet").join("setup.sh"),
+            "#!/bin/zsh\necho setup\n",
+        )
+        .unwrap();
+        fs::create_dir_all(repo.repo_path.join("templates")).unwrap();
+        fs::write(
+            repo.repo_path.join("templates").join("agent.txt"),
+            "preset\n",
+        )
+        .unwrap();
+
+        let registration = register_project(&repo.repo_path, "codex").unwrap();
+        let outcome = create_workspace(
+            &registration.project,
+            "codex",
+            CreateWorkspaceOptions { run_setup: false },
+        )
+        .unwrap();
+
+        assert!(
+            outcome
+                .workspace
+                .worktree_path
+                .join(".superzet")
+                .join("setup.sh")
+                .exists()
+        );
+        assert!(
+            outcome
+                .workspace
+                .worktree_path
+                .join("templates")
+                .join("agent.txt")
+                .exists()
+        );
+
+        delete_workspace(&outcome.workspace, &registration.project.repo_root, true).unwrap();
+    }
+
+    #[test]
+    fn create_workspace_rejects_copy_paths_outside_repo() {
+        let repo = init_repo();
+        fs::create_dir_all(repo.repo_path.join(".superzet")).unwrap();
+        fs::write(
+            repo.repo_path.join(".superzet").join("config.json"),
+            r#"{"copy":["../outside"]}"#,
+        )
+        .unwrap();
+
+        let registration = register_project(&repo.repo_path, "codex").unwrap();
+        let error = create_workspace(
+            &registration.project,
+            "codex",
+            CreateWorkspaceOptions { run_setup: true },
+        )
+        .unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("cannot leave the repository root")
+        );
+    }
+
+    #[test]
+    fn create_workspace_reports_missing_copy_sources_as_warning() {
+        let repo = init_repo();
+        fs::create_dir_all(repo.repo_path.join(".superzet")).unwrap();
+        fs::write(
+            repo.repo_path.join(".superzet").join("config.json"),
+            r#"{"copy":["missing-directory"]}"#,
+        )
+        .unwrap();
+
+        let registration = register_project(&repo.repo_path, "codex").unwrap();
+        let outcome = create_workspace(
+            &registration.project,
+            "codex",
+            CreateWorkspaceOptions { run_setup: true },
+        )
+        .unwrap();
+
+        assert!(
+            outcome
+                .warning
+                .as_deref()
+                .is_some_and(|warning| warning.contains("missing-directory"))
+        );
 
         delete_workspace(&outcome.workspace, &registration.project.repo_root, true).unwrap();
     }

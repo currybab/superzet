@@ -184,6 +184,7 @@ members = [
     "crates/storybook",
     "crates/streaming_diff",
     "crates/superzed_git",
+    "crates/superzed_agent",
     "crates/superzed_model",
     "crates/superzed_ui",
     "crates/sum_tree",
@@ -431,6 +432,7 @@ sqlez_macros = { path = "crates/sqlez_macros" }
 story = { path = "crates/story" }
 streaming_diff = { path = "crates/streaming_diff" }
 superzet_git = { path = "crates/superzed_git" }
+superzet_agent = { path = "crates/superzed_agent" }
 superzet_model = { path = "crates/superzed_model" }
 superzet_ui = { path = "crates/superzed_ui" }
 sum_tree = { path = "crates/sum_tree" }

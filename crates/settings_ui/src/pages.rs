@@ -3,6 +3,7 @@ mod audio_input_output_setup;
 mod audio_test_window;
 #[cfg(any(test, feature = "test-support"))]
 mod edit_prediction_provider_setup;
+mod superzet_agent_presets;
 #[cfg(any(test, feature = "test-support"))]
 mod tool_permissions_setup;
 
@@ -13,6 +14,7 @@ pub(crate) use audio_input_output_setup::{
 pub(crate) use audio_test_window::open_audio_test_window;
 #[cfg(any(test, feature = "test-support"))]
 pub(crate) use edit_prediction_provider_setup::render_edit_prediction_setup_page;
+pub(crate) use superzet_agent_presets::render_superzet_agent_presets_page;
 #[cfg(any(test, feature = "test-support"))]
 pub(crate) use tool_permissions_setup::render_tool_permissions_setup_page;
 

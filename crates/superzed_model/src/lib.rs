@@ -1,3 +1,4 @@
+use anyhow::{Result, bail};
 use chrono::{DateTime, Utc};
 use gpui::{App, AppContext, Context, Entity, Global};
 use serde::{Deserialize, Serialize};
@@ -46,6 +47,27 @@ pub struct AgentPreset {
     pub env: BTreeMap<String, String>,
     #[serde(default)]
     pub attention_patterns: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct AgentPresetDraft {
+    pub label: String,
+    pub command: String,
+    pub args: Vec<String>,
+    pub env: BTreeMap<String, String>,
+    pub attention_patterns: Vec<String>,
+}
+
+impl From<&AgentPreset> for AgentPresetDraft {
+    fn from(value: &AgentPreset) -> Self {
+        Self {
+            label: value.label.clone(),
+            command: value.command.clone(),
+            args: value.args.clone(),
+            env: value.env.clone(),
+            attention_patterns: value.attention_patterns.clone(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -246,6 +268,118 @@ impl SuperzetStore {
         self.state.presets.iter().find(|preset| preset.id == id)
     }
 
+    pub fn create_preset(
+        &mut self,
+        draft: AgentPresetDraft,
+        cx: &mut Context<Self>,
+    ) -> Result<AgentPreset> {
+        let base_id = preset_slug(&draft.label);
+        let preset = draft.into_preset(self.unique_preset_id(&base_id))?;
+        self.state.presets.push(preset.clone());
+        self.persist_and_notify(cx);
+        Ok(preset)
+    }
+
+    pub fn update_preset(
+        &mut self,
+        preset_id: &str,
+        draft: AgentPresetDraft,
+        cx: &mut Context<Self>,
+    ) -> Result<()> {
+        let Some(preset_index) = self
+            .state
+            .presets
+            .iter()
+            .position(|preset| preset.id == preset_id)
+        else {
+            bail!("unknown preset `{preset_id}`");
+        };
+
+        self.state.presets[preset_index] = draft.into_preset(preset_id.to_string())?;
+        self.persist_and_notify(cx);
+        Ok(())
+    }
+
+    pub fn delete_preset(&mut self, preset_id: &str, cx: &mut Context<Self>) -> Result<()> {
+        if self.state.presets.len() <= 1 {
+            bail!("at least one preset is required");
+        }
+
+        let Some(preset_index) = self
+            .state
+            .presets
+            .iter()
+            .position(|preset| preset.id == preset_id)
+        else {
+            bail!("unknown preset `{preset_id}`");
+        };
+
+        self.state.presets.remove(preset_index);
+        let fallback_preset_id = self
+            .state
+            .presets
+            .first()
+            .map(|preset| preset.id.clone())
+            .ok_or_else(|| anyhow::anyhow!("missing fallback preset"))?;
+
+        for workspace in &mut self.state.workspaces {
+            if workspace.agent_preset_id == preset_id {
+                workspace.agent_preset_id = fallback_preset_id.clone();
+            }
+        }
+
+        self.persist_and_notify(cx);
+        Ok(())
+    }
+
+    pub fn reorder_preset(
+        &mut self,
+        dragged_preset_id: &str,
+        target_preset_id: Option<&str>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(source_index) = self
+            .state
+            .presets
+            .iter()
+            .position(|preset| preset.id == dragged_preset_id)
+        else {
+            return;
+        };
+
+        if let Some(target_preset_id) = target_preset_id {
+            let Some(target_index) = self
+                .state
+                .presets
+                .iter()
+                .position(|preset| preset.id == target_preset_id)
+            else {
+                return;
+            };
+
+            if source_index == target_index {
+                return;
+            }
+
+            let preset = self.state.presets.remove(source_index);
+            let Some(insert_index) = self
+                .state
+                .presets
+                .iter()
+                .position(|preset| preset.id == target_preset_id)
+            else {
+                self.state.presets.insert(source_index, preset);
+                return;
+            };
+            self.state.presets.insert(insert_index, preset);
+        } else {
+            let preset = self.state.presets.remove(source_index);
+            self.state.presets.push(preset);
+        }
+
+        self.persist_and_notify(cx);
+    }
+
     pub fn set_active_workspace(
         &mut self,
         workspace_id: Option<impl Into<String>>,
@@ -430,6 +564,31 @@ impl SuperzetStore {
         }
     }
 
+    pub fn set_workspace_agent_preset(
+        &mut self,
+        workspace_id: &str,
+        preset_id: &str,
+        cx: &mut Context<Self>,
+    ) {
+        if self.preset(preset_id).is_none() {
+            return;
+        }
+
+        let Some(workspace) = self
+            .state
+            .workspaces
+            .iter_mut()
+            .find(|workspace| workspace.id == workspace_id)
+        else {
+            return;
+        };
+
+        if workspace.agent_preset_id != preset_id {
+            workspace.agent_preset_id = preset_id.to_string();
+            self.persist_and_notify(cx);
+        }
+    }
+
     pub fn remove_workspace(
         &mut self,
         workspace_id: &str,
@@ -476,9 +635,7 @@ impl SuperzetStore {
                 return;
             };
 
-            if source_ix == target_ix
-                || self.state.workspaces[target_ix].project_id != project_id
-            {
+            if source_ix == target_ix || self.state.workspaces[target_ix].project_id != project_id {
                 return;
             }
 
@@ -726,6 +883,43 @@ impl SuperzetStore {
                 .first()
                 .map(|workspace| workspace.id.clone());
         }
+
+        let mut preset_ids = BTreeSet::new();
+        for preset in &mut self.state.presets {
+            if preset.label.trim().is_empty() {
+                preset.label = "Preset".to_string();
+            }
+
+            let desired_id = if preset.id.trim().is_empty() {
+                preset_slug(&preset.label)
+            } else {
+                preset_slug(&preset.id)
+            };
+            preset.id = unique_slug(&desired_id, &mut preset_ids);
+        }
+
+        if self.state.presets.is_empty() {
+            self.state.presets = default_presets();
+        }
+
+        let valid_preset_ids = self
+            .state
+            .presets
+            .iter()
+            .map(|preset| preset.id.as_str())
+            .collect::<BTreeSet<_>>();
+        let fallback_preset_id = self
+            .state
+            .presets
+            .first()
+            .map(|preset| preset.id.clone())
+            .unwrap_or_else(|| "codex".to_string());
+
+        for workspace in &mut self.state.workspaces {
+            if !valid_preset_ids.contains(workspace.agent_preset_id.as_str()) {
+                workspace.agent_preset_id = fallback_preset_id.clone();
+            }
+        }
     }
 
     fn persist_and_notify(&self, cx: &mut Context<Self>) {
@@ -919,6 +1113,110 @@ fn default_presets() -> Vec<AgentPreset> {
             attention_patterns: vec!["press enter".into()],
         },
     ]
+}
+
+impl AgentPresetDraft {
+    fn into_preset(self, id: String) -> Result<AgentPreset> {
+        let label = self.label.trim().to_string();
+        let command = self.command.trim().to_string();
+
+        if label.is_empty() {
+            bail!("preset label is required");
+        }
+        if command.is_empty() {
+            bail!("preset command is required");
+        }
+
+        let args = self
+            .args
+            .into_iter()
+            .map(|argument| argument.trim().to_string())
+            .filter(|argument| !argument.is_empty())
+            .collect();
+        let env = self
+            .env
+            .into_iter()
+            .filter_map(|(key, value)| {
+                let key = key.trim().to_string();
+                if key.is_empty() {
+                    return None;
+                }
+
+                Some((key, value.trim().to_string()))
+            })
+            .collect();
+        let attention_patterns = self
+            .attention_patterns
+            .into_iter()
+            .map(|pattern| pattern.trim().to_string())
+            .filter(|pattern| !pattern.is_empty())
+            .collect();
+
+        Ok(AgentPreset {
+            id,
+            label,
+            command,
+            args,
+            env,
+            attention_patterns,
+        })
+    }
+}
+
+impl SuperzetStore {
+    fn unique_preset_id(&self, base_id: &str) -> String {
+        let existing_ids = self
+            .state
+            .presets
+            .iter()
+            .map(|preset| preset.id.as_str())
+            .collect::<BTreeSet<_>>();
+        let mut used_ids = existing_ids
+            .into_iter()
+            .map(str::to_string)
+            .collect::<BTreeSet<_>>();
+        unique_slug(base_id, &mut used_ids)
+    }
+}
+
+fn preset_slug(value: &str) -> String {
+    let mut slug = String::new();
+    let mut previous_was_separator = false;
+
+    for character in value.chars() {
+        let next_character = if character.is_ascii_alphanumeric() {
+            previous_was_separator = false;
+            character.to_ascii_lowercase()
+        } else {
+            if previous_was_separator || slug.is_empty() {
+                continue;
+            }
+            previous_was_separator = true;
+            '-'
+        };
+        slug.push(next_character);
+    }
+
+    let slug = slug.trim_matches('-').to_string();
+    if slug.is_empty() {
+        "preset".to_string()
+    } else {
+        slug
+    }
+}
+
+fn unique_slug(base_id: &str, used_ids: &mut BTreeSet<String>) -> String {
+    let base_id = preset_slug(base_id);
+    let mut next_id = base_id.clone();
+    let mut suffix = 2usize;
+
+    while used_ids.contains(&next_id) {
+        next_id = format!("{base_id}-{suffix}");
+        suffix += 1;
+    }
+
+    used_ids.insert(next_id.clone());
+    next_id
 }
 
 pub fn ensure_parent_dir(path: &Path) -> anyhow::Result<()> {

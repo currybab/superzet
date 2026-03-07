@@ -295,9 +295,9 @@ impl Render for Onboarding {
                                                         Label::new(
                                                             "Local workspaces for coding agents",
                                                         )
-                                                            .color(Color::Muted)
-                                                            .size(LabelSize::Small)
-                                                            .italic(),
+                                                        .color(Color::Muted)
+                                                        .size(LabelSize::Small)
+                                                        .italic(),
                                                     ),
                                             ),
                                     )

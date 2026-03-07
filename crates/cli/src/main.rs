@@ -964,7 +964,7 @@ mod flatpak {
                 )
                 .into(),
             );
-                args.push(flatpak_dir.join("bin").join("superzet").into());
+            args.push(flatpak_dir.join("bin").join("superzet").into());
 
             let mut is_app_location_set = false;
             for arg in &env::args_os().collect::<Vec<_>>()[1..] {

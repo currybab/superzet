@@ -150,7 +150,6 @@ impl CommitModal {
                 }
             }
             git_panel.set_modal_open(true, cx);
-            git_panel.load_local_committer(cx);
         });
 
         let dock = workspace.dock_at_position(git_panel.position(window, cx));
@@ -332,7 +331,6 @@ impl CommitModal {
             can_commit,
             tooltip,
             commit_label,
-            co_authors,
             generate_commit_message,
             active_repo,
             is_amend_pending,
@@ -341,7 +339,6 @@ impl CommitModal {
         ) = self.git_panel.update(cx, |git_panel, cx| {
             let (can_commit, tooltip) = git_panel.configure_commit_button(cx);
             let title = git_panel.commit_button_title();
-            let co_authors = git_panel.render_co_authors(cx);
             let generate_commit_message = git_panel.render_generate_commit_message_button(cx);
             let active_repo = git_panel.active_repository.clone();
             let is_amend_pending = git_panel.amend_pending();
@@ -350,7 +347,6 @@ impl CommitModal {
                 can_commit,
                 tooltip,
                 title,
-                co_authors,
                 generate_commit_message,
                 active_repo,
                 is_amend_pending,
@@ -422,8 +418,7 @@ impl CommitModal {
                             .overflow_x_hidden()
                             .child(branch_picker),
                     )
-                    .children(generate_commit_message)
-                    .children(co_authors),
+                    .children(generate_commit_message),
             )
             .child(div().flex_1())
             .child(

@@ -7342,7 +7342,6 @@ dependencies = [
  "anyhow",
  "askpass",
  "buffer_diff",
- "call",
  "cloud_llm_client",
  "collections",
  "component",
@@ -15666,13 +15665,11 @@ dependencies = [
  "agent_settings",
  "anyhow",
  "assets",
- "audio",
  "client",
  "codestral",
  "component",
  "copilot",
  "copilot_ui",
- "cpal",
  "edit_prediction",
  "edit_prediction_ui",
  "editor",
@@ -15694,7 +15691,6 @@ dependencies = [
  "recent_projects",
  "regex",
  "release_channel",
- "rodio",
  "schemars",
  "search",
  "serde",
@@ -15703,6 +15699,7 @@ dependencies = [
  "settings",
  "shell_command_parser",
  "strum 0.27.2",
+ "superzet_model",
  "telemetry",
  "theme",
  "title_bar",
@@ -16791,11 +16788,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "superzet_agent"
+version = "0.1.0"
+dependencies = [
+ "superzet_model",
+ "task",
+]
+
+[[package]]
 name = "superzet_git"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "log",
  "serde",
  "serde_json",
  "superzet_model",
@@ -16825,9 +16831,11 @@ dependencies = [
  "editor",
  "git_ui",
  "gpui",
+ "log",
  "menu",
  "project",
  "project_panel",
+ "superzet_agent",
  "superzet_git",
  "superzet_model",
  "terminal_view",
@@ -16835,6 +16843,7 @@ dependencies = [
  "ui",
  "util",
  "workspace",
+ "zed_actions",
 ]
 
 [[package]]

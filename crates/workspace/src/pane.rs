@@ -394,6 +394,8 @@ pub struct Pane {
         ) -> (Option<AnyElement>, Option<AnyElement>),
     >,
     render_tab_bar: Rc<dyn Fn(&mut Pane, &mut Window, &mut Context<Pane>) -> AnyElement>,
+    render_tab_bar_accessory:
+        Rc<dyn Fn(&mut Pane, &mut Window, &mut Context<Pane>) -> Option<AnyElement>>,
     show_tab_bar_buttons: bool,
     max_tabs: Option<NonZeroUsize>,
     use_max_tabs: bool,
@@ -570,6 +572,7 @@ impl Pane {
             should_display_welcome_page: false,
             render_tab_bar_buttons: Rc::new(default_render_tab_bar_buttons),
             render_tab_bar: Rc::new(Self::render_tab_bar),
+            render_tab_bar_accessory: Rc::new(|_, _, _| None),
             show_tab_bar_buttons: TabBarSettings::get_global(cx).show_tab_bar_buttons,
             display_nav_history_buttons: Some(
                 TabBarSettings::get_global(cx).show_nav_history_buttons,
@@ -830,6 +833,14 @@ impl Pane {
         cx.notify();
     }
 
+    pub fn set_render_tab_bar_accessory<F>(&mut self, cx: &mut Context<Self>, render: F)
+    where
+        F: 'static + Fn(&mut Pane, &mut Window, &mut Context<Pane>) -> Option<AnyElement>,
+    {
+        self.render_tab_bar_accessory = Rc::new(render);
+        cx.notify();
+    }
+
     pub fn set_render_tab_bar_buttons<F>(&mut self, cx: &mut Context<Self>, render: F)
     where
         F: 'static
@@ -841,6 +852,14 @@ impl Pane {
     {
         self.render_tab_bar_buttons = Rc::new(render);
         cx.notify();
+    }
+
+    pub fn workspace(&self) -> Option<Entity<Workspace>> {
+        self.workspace.upgrade()
+    }
+
+    pub fn active_item_as<I: 'static>(&self) -> Option<Entity<I>> {
+        self.active_item()?.to_any_view().downcast::<I>().ok()
     }
 
     pub fn nav_history_for_item<T: Item>(&self, item: &Entity<T>) -> ItemNavHistory {
@@ -4354,6 +4373,12 @@ impl Render for Pane {
             .when(self.active_item().is_some() && display_tab_bar, |pane| {
                 pane.child((self.render_tab_bar.clone())(self, window, cx))
             })
+            .when_some(
+                display_tab_bar
+                    .then(|| (self.render_tab_bar_accessory.clone())(self, window, cx))
+                    .flatten(),
+                |pane, accessory| pane.child(accessory),
+            )
             .child({
                 let has_worktrees = project.read(cx).visible_worktrees(cx).next().is_some();
                 // main content

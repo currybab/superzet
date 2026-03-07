@@ -268,9 +268,7 @@ pub fn release_notes_url(cx: &mut App) -> Option<String> {
         ReleaseChannel::Nightly => {
             "https://github.com/nerdface-ai/superzet/commits/nightly/".to_string()
         }
-        ReleaseChannel::Dev => {
-            "https://github.com/nerdface-ai/superzet/commits/main/".to_string()
-        }
+        ReleaseChannel::Dev => "https://github.com/nerdface-ai/superzet/commits/main/".to_string(),
     };
     Some(url)
 }
@@ -603,8 +601,7 @@ impl AutoUpdater {
         });
 
         let fetched_release_data =
-            Self::get_release_asset(&this, release_channel, None, "superzet", OS, ARCH, cx)
-                .await?;
+            Self::get_release_asset(&this, release_channel, None, "superzet", OS, ARCH, cx).await?;
         let fetched_version = fetched_release_data.clone().version;
         let app_commit_sha = Ok(cx.update(|cx| AppCommitSha::try_global(cx).map(|sha| sha.full())));
         let newer_version = Self::check_if_fetched_version_is_newer(

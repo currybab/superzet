@@ -1293,7 +1293,8 @@ mod tests {
             OpenRequest::parse(
                 RawOpenRequest {
                     urls: vec![
-                        "superzet://git/clone/?repo=https://github.com/zed-industries/zed.git".into(),
+                        "superzet://git/clone/?repo=https://github.com/zed-industries/zed.git"
+                            .into(),
                     ],
                     ..Default::default()
                 },
@@ -1318,7 +1319,8 @@ mod tests {
             OpenRequest::parse(
                 RawOpenRequest {
                     urls: vec![
-                        "superzet://git/clone?repo=https://github.com/zed-industries/zed.git".into(),
+                        "superzet://git/clone?repo=https://github.com/zed-industries/zed.git"
+                            .into(),
                     ],
                     ..Default::default()
                 },

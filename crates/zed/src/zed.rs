@@ -1158,6 +1158,8 @@ fn initialize_pane(
     window: &mut Window,
     cx: &mut Context<Workspace>,
 ) {
+    superzed_ui::install_pane_accessory(pane, cx);
+
     let workspace_handle = cx.weak_entity();
     pane.update(cx, |pane, cx| {
         pane.toolbar().update(cx, |toolbar, cx| {
@@ -5148,8 +5150,12 @@ mod tests {
         // 5. Critical: Verify .superzet is actually excluded from worktree
         let worktree = cx.update(|cx| project.read(cx).worktrees(cx).next().unwrap());
 
-        let has_zed_entry =
-            cx.update(|cx| worktree.read(cx).entry_for_path(rel_path(".superzet")).is_some());
+        let has_zed_entry = cx.update(|cx| {
+            worktree
+                .read(cx)
+                .entry_for_path(rel_path(".superzet"))
+                .is_some()
+        });
 
         eprintln!(
             "Is .superzet directory visible in worktree after exclusion: {}",
