@@ -6164,6 +6164,34 @@ fn terminal_page() -> SettingsPage {
         ]
     }
 
+    fn agent_notifications_section() -> [SettingsPageItem; 2] {
+        [
+            SettingsPageItem::SectionHeader("Agent Notifications"),
+            SettingsPageItem::SettingItem(SettingItem {
+                title: "Native Notifications",
+                description: "When to show macOS notifications for managed Codex and Claude terminal sessions.",
+                field: Box::new(SettingField {
+                    json_path: Some("terminal.agent_notifications"),
+                    pick: |settings_content| {
+                        settings_content
+                            .terminal
+                            .as_ref()?
+                            .agent_notifications
+                            .as_ref()
+                    },
+                    write: |settings_content, value| {
+                        settings_content
+                            .terminal
+                            .get_or_insert_default()
+                            .agent_notifications = value;
+                    },
+                }),
+                metadata: None,
+                files: USER,
+            }),
+        ]
+    }
+
     fn agent_presets_section() -> [SettingsPageItem; 2] {
         [
             SettingsPageItem::SectionHeader("Agent Presets"),
@@ -6171,7 +6199,7 @@ fn terminal_page() -> SettingsPage {
                 title: "Manage Agent Presets".into(),
                 r#type: crate::SubPageType::default(),
                 description: Some(
-                    "Configure preset buttons and managed workspace defaults.".into(),
+                    "Configure preset buttons, managed workspace defaults, and terminal hook notifications.".into(),
                 ),
                 json_path: Some("terminal.agent_presets"),
                 in_json: false,
@@ -6192,6 +6220,7 @@ fn terminal_page() -> SettingsPage {
             advanced_settings_section(),
             toolbar_section(),
             scrollbar_section(),
+            agent_notifications_section(),
             agent_presets_section(),
         ],
     }

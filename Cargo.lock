@@ -13162,6 +13162,7 @@ dependencies = [
  "snippet",
  "snippet_provider",
  "sum_tree",
+ "superzet_agent",
  "task",
  "tempfile",
  "terminal",
@@ -16791,8 +16792,19 @@ dependencies = [
 name = "superzet_agent"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "collections",
+ "log",
+ "paths",
+ "serde",
+ "serde_json",
+ "serde_urlencoded",
+ "smol",
  "superzet_model",
  "task",
+ "tiny_http",
+ "url",
+ "uuid",
 ]
 
 [[package]]
@@ -16835,9 +16847,11 @@ dependencies = [
  "menu",
  "project",
  "project_panel",
+ "settings",
  "superzet_agent",
  "superzet_git",
  "superzet_model",
+ "terminal",
  "terminal_view",
  "theme",
  "ui",

@@ -6,7 +6,9 @@ use std::{
     path::{Component, Path, PathBuf},
     process::Command,
 };
-use superzet_model::{GitChangeSummary, ProjectEntry, WorkspaceEntry, WorkspaceKind};
+use superzet_model::{
+    GitChangeSummary, ProjectEntry, WorkspaceAttentionStatus, WorkspaceEntry, WorkspaceKind,
+};
 use uuid::Uuid;
 
 #[derive(Debug)]
@@ -61,6 +63,8 @@ pub fn register_project(repo_hint: &Path, preset_id: &str) -> Result<ProjectRegi
         agent_preset_id: preset_id.to_string(),
         managed: false,
         git_summary: git_change_summary(&repo_root).ok(),
+        attention_status: WorkspaceAttentionStatus::Idle,
+        review_pending: false,
         last_attention_reason: None,
         created_at: now,
         last_opened_at: now,
@@ -141,6 +145,8 @@ pub fn create_workspace(
             agent_preset_id: preset_id.to_string(),
             managed: true,
             git_summary: refresh.git_summary,
+            attention_status: WorkspaceAttentionStatus::Idle,
+            review_pending: false,
             last_attention_reason: warning.clone(),
             created_at: Utc::now(),
             last_opened_at: Utc::now(),

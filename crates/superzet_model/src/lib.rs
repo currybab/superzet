@@ -30,6 +30,16 @@ pub enum WorkspaceKind {
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkspaceAttentionStatus {
+    #[default]
+    Idle,
+    Working,
+    Permission,
+    Review,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct GitChangeSummary {
     pub changed_files: usize,
     pub staged_files: usize,
@@ -95,6 +105,10 @@ pub struct WorkspaceEntry {
     pub managed: bool,
     #[serde(default)]
     pub git_summary: Option<GitChangeSummary>,
+    #[serde(default)]
+    pub attention_status: WorkspaceAttentionStatus,
+    #[serde(default)]
+    pub review_pending: bool,
     #[serde(default)]
     pub last_attention_reason: Option<String>,
     pub created_at: DateTime<Utc>,
@@ -226,6 +240,14 @@ impl SuperzetStore {
             .find(|workspace| workspace.worktree_path == path)
     }
 
+    pub fn workspace_for_path_or_ancestor(&self, path: &Path) -> Option<&WorkspaceEntry> {
+        self.state
+            .workspaces
+            .iter()
+            .filter(|workspace| path.starts_with(&workspace.worktree_path))
+            .max_by_key(|workspace| workspace.worktree_path.components().count())
+    }
+
     pub fn project_for_workspace(&self, workspace_id: &str) -> Option<&ProjectEntry> {
         self.workspace(workspace_id)
             .and_then(|workspace| self.project(&workspace.project_id))
@@ -243,6 +265,11 @@ impl SuperzetStore {
             .workspaces
             .iter()
             .find(|workspace| workspace.project_id == project_id && workspace.is_primary())
+    }
+
+    pub fn startup_workspace(&self) -> Option<&WorkspaceEntry> {
+        self.active_workspace()
+            .or_else(|| self.default_startup_workspace())
     }
 
     pub fn workspaces_for_project(&self, project_id: &str) -> Vec<&WorkspaceEntry> {
@@ -386,6 +413,9 @@ impl SuperzetStore {
         cx: &mut Context<Self>,
     ) {
         self.state.active_workspace_id = workspace_id.map(Into::into);
+        if let Some(workspace_id) = self.state.active_workspace_id.clone() {
+            self.clear_workspace_review_pending(&workspace_id);
+        }
         self.state.active_project_id = self
             .state
             .active_workspace_id
@@ -403,7 +433,7 @@ impl SuperzetStore {
 
     pub fn set_active_workspace_by_path(&mut self, path: &Path, cx: &mut Context<Self>) {
         let workspace_id = self
-            .workspace_for_path(path)
+            .workspace_for_path_or_ancestor(path)
             .map(|workspace| workspace.id.clone());
         self.set_active_workspace(workspace_id, cx);
     }
@@ -503,6 +533,11 @@ impl SuperzetStore {
         };
 
         workspace.last_opened_at = now;
+        workspace.review_pending = false;
+        if workspace.attention_status == WorkspaceAttentionStatus::Review {
+            workspace.attention_status = WorkspaceAttentionStatus::Idle;
+            workspace.last_attention_reason = None;
+        }
         let project_id = workspace.project_id.clone();
         if let Some(project) = self
             .state
@@ -827,6 +862,62 @@ impl SuperzetStore {
             .unwrap_or(TaskStatus::Idle)
     }
 
+    pub fn set_workspace_attention(
+        &mut self,
+        workspace_id: &str,
+        attention_status: WorkspaceAttentionStatus,
+        review_pending: bool,
+        reason: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(workspace) = self
+            .state
+            .workspaces
+            .iter_mut()
+            .find(|workspace| workspace.id == workspace_id)
+        else {
+            return;
+        };
+
+        if workspace.attention_status == attention_status
+            && workspace.review_pending == review_pending
+            && workspace.last_attention_reason == reason
+        {
+            return;
+        }
+
+        workspace.attention_status = attention_status;
+        workspace.review_pending = review_pending;
+        workspace.last_attention_reason = reason;
+        self.persist_and_notify(cx);
+    }
+
+    pub fn acknowledge_workspace_review(&mut self, workspace_id: &str, cx: &mut Context<Self>) {
+        let Some(workspace) = self
+            .state
+            .workspaces
+            .iter_mut()
+            .find(|workspace| workspace.id == workspace_id)
+        else {
+            return;
+        };
+
+        let mut changed = false;
+        if workspace.review_pending {
+            workspace.review_pending = false;
+            changed = true;
+        }
+        if workspace.attention_status == WorkspaceAttentionStatus::Review {
+            workspace.attention_status = WorkspaceAttentionStatus::Idle;
+            workspace.last_attention_reason = None;
+            changed = true;
+        }
+
+        if changed {
+            self.persist_and_notify(cx);
+        }
+    }
+
     fn load() -> Self {
         let state_path = state_path();
         let mut state = fs::read_to_string(&state_path)
@@ -853,6 +944,7 @@ impl SuperzetStore {
 
         let mut store = Self { state_path, state };
         store.normalize();
+        store.clear_transient_workspace_attention();
         store
     }
 
@@ -867,58 +959,47 @@ impl SuperzetStore {
             .workspaces
             .retain(|workspace| project_ids.contains(&workspace.project_id));
 
-        let existing_project_ids = self
-            .state
-            .projects
-            .iter()
-            .map(|project| project.id.as_str())
-            .collect::<BTreeSet<_>>();
-        if self
-            .state
-            .active_project_id
-            .as_deref()
-            .is_some_and(|id| !existing_project_ids.contains(id))
-        {
-            self.state.active_project_id = self
-                .state
-                .projects
-                .first()
-                .map(|project| project.id.clone());
-        }
-
         let existing_workspace_ids = self
             .state
             .workspaces
             .iter()
             .map(|workspace| workspace.id.as_str())
             .collect::<BTreeSet<_>>();
+        let fallback_workspace_id = self
+            .default_startup_workspace()
+            .map(|workspace| workspace.id.clone());
         if self
             .state
             .active_workspace_id
             .as_deref()
             .is_some_and(|id| !existing_workspace_ids.contains(id))
         {
-            self.state.active_workspace_id = self
-                .state
-                .workspaces
-                .first()
-                .map(|workspace| workspace.id.clone());
+            self.state.active_workspace_id = fallback_workspace_id.clone();
         }
 
-        if self.state.active_project_id.is_none() {
-            self.state.active_project_id = self
-                .state
-                .projects
-                .first()
-                .map(|project| project.id.clone());
-        }
         if self.state.active_workspace_id.is_none() {
-            self.state.active_workspace_id = self
-                .state
-                .workspaces
-                .first()
-                .map(|workspace| workspace.id.clone());
+            self.state.active_workspace_id = fallback_workspace_id;
         }
+
+        let existing_project_ids = self
+            .state
+            .projects
+            .iter()
+            .map(|project| project.id.as_str())
+            .collect::<BTreeSet<_>>();
+        self.state.active_project_id = self
+            .state
+            .active_workspace_id
+            .as_deref()
+            .and_then(|workspace_id| self.workspace(workspace_id))
+            .map(|workspace| workspace.project_id.clone())
+            .or_else(|| {
+                self.state
+                    .active_project_id
+                    .clone()
+                    .filter(|project_id| existing_project_ids.contains(project_id.as_str()))
+            })
+            .or_else(|| self.state.projects.first().map(|project| project.id.clone()));
 
         let mut preset_ids = BTreeSet::new();
         for preset in &mut self.state.presets {
@@ -955,6 +1036,59 @@ impl SuperzetStore {
             if !valid_preset_ids.contains(workspace.agent_preset_id.as_str()) {
                 workspace.agent_preset_id = fallback_preset_id.clone();
             }
+
+            if workspace.attention_status == WorkspaceAttentionStatus::Review {
+                workspace.review_pending = true;
+            } else if workspace.review_pending
+                && workspace.attention_status == WorkspaceAttentionStatus::Idle
+            {
+                workspace.attention_status = WorkspaceAttentionStatus::Review;
+            }
+        }
+    }
+
+    fn default_startup_workspace(&self) -> Option<&WorkspaceEntry> {
+        self.state
+            .projects
+            .first()
+            .and_then(|project| self.primary_workspace_for_project(&project.id))
+            .or_else(|| self.state.workspaces.first())
+    }
+
+    fn clear_transient_workspace_attention(&mut self) {
+        for workspace in &mut self.state.workspaces {
+            if workspace.attention_status == WorkspaceAttentionStatus::Review {
+                workspace.review_pending = true;
+                continue;
+            }
+
+            if matches!(
+                workspace.attention_status,
+                WorkspaceAttentionStatus::Working | WorkspaceAttentionStatus::Permission
+            ) {
+                workspace.attention_status = if workspace.review_pending {
+                    WorkspaceAttentionStatus::Review
+                } else {
+                    WorkspaceAttentionStatus::Idle
+                };
+            }
+        }
+    }
+
+    fn clear_workspace_review_pending(&mut self, workspace_id: &str) {
+        let Some(workspace) = self
+            .state
+            .workspaces
+            .iter_mut()
+            .find(|workspace| workspace.id == workspace_id)
+        else {
+            return;
+        };
+
+        workspace.review_pending = false;
+        if workspace.attention_status == WorkspaceAttentionStatus::Review {
+            workspace.attention_status = WorkspaceAttentionStatus::Idle;
+            workspace.last_attention_reason = None;
         }
     }
 
@@ -1069,6 +1203,8 @@ fn load_legacy_state() -> Option<SuperzetState> {
                 agent_preset_id: default_preset_id.clone(),
                 managed: false,
                 git_summary: None,
+                attention_status: WorkspaceAttentionStatus::Idle,
+                review_pending: false,
                 last_attention_reason: None,
                 created_at: task.created_at,
                 last_opened_at: task.last_event_at,
@@ -1086,6 +1222,16 @@ fn load_legacy_state() -> Option<SuperzetState> {
             agent_preset_id: task.agent_preset_id,
             managed: task.managed,
             git_summary: None,
+            attention_status: match task.status {
+                TaskStatus::Completed | TaskStatus::Failed | TaskStatus::NeedsAttention => {
+                    WorkspaceAttentionStatus::Review
+                }
+                _ => WorkspaceAttentionStatus::Idle,
+            },
+            review_pending: matches!(
+                task.status,
+                TaskStatus::Completed | TaskStatus::Failed | TaskStatus::NeedsAttention
+            ),
             last_attention_reason: task.last_attention_reason.clone(),
             created_at: task.created_at,
             last_opened_at: task.last_event_at,
@@ -1260,4 +1406,188 @@ pub fn ensure_parent_dir(path: &Path) -> anyhow::Result<()> {
         fs::create_dir_all(parent)?;
     }
     Ok(())
+}
+
+pub fn aggregate_workspace_attention_status(
+    live_attention_status: Option<WorkspaceAttentionStatus>,
+    review_pending: bool,
+) -> WorkspaceAttentionStatus {
+    match live_attention_status {
+        Some(WorkspaceAttentionStatus::Permission) => WorkspaceAttentionStatus::Permission,
+        Some(WorkspaceAttentionStatus::Working) => WorkspaceAttentionStatus::Working,
+        Some(WorkspaceAttentionStatus::Review) => WorkspaceAttentionStatus::Review,
+        Some(WorkspaceAttentionStatus::Idle) | None => {
+            if review_pending {
+                WorkspaceAttentionStatus::Review
+            } else {
+                WorkspaceAttentionStatus::Idle
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn project_entry(id: &str, repo_root: &str) -> ProjectEntry {
+        ProjectEntry {
+            id: id.to_string(),
+            name: id.to_string(),
+            repo_root: PathBuf::from(repo_root),
+            collapsed: false,
+            created_at: Utc::now(),
+            last_opened_at: Utc::now(),
+        }
+    }
+
+    fn workspace_entry(
+        id: &str,
+        project_id: &str,
+        kind: WorkspaceKind,
+        worktree_path: &str,
+    ) -> WorkspaceEntry {
+        WorkspaceEntry {
+            id: id.to_string(),
+            project_id: project_id.to_string(),
+            kind,
+            name: id.to_string(),
+            display_name: None,
+            branch: "main".to_string(),
+            worktree_path: PathBuf::from(worktree_path),
+            agent_preset_id: "codex".to_string(),
+            managed: false,
+            git_summary: None,
+            attention_status: WorkspaceAttentionStatus::Idle,
+            review_pending: false,
+            last_attention_reason: None,
+            created_at: Utc::now(),
+            last_opened_at: Utc::now(),
+        }
+    }
+
+    #[test]
+    fn aggregates_live_attention_over_review_pending() {
+        assert_eq!(
+            aggregate_workspace_attention_status(
+                Some(WorkspaceAttentionStatus::Permission),
+                true,
+            ),
+            WorkspaceAttentionStatus::Permission
+        );
+        assert_eq!(
+            aggregate_workspace_attention_status(Some(WorkspaceAttentionStatus::Working), true),
+            WorkspaceAttentionStatus::Working
+        );
+        assert_eq!(
+            aggregate_workspace_attention_status(None, true),
+            WorkspaceAttentionStatus::Review
+        );
+        assert_eq!(
+            aggregate_workspace_attention_status(None, false),
+            WorkspaceAttentionStatus::Idle
+        );
+    }
+
+    #[test]
+    fn finds_deepest_workspace_ancestor() {
+        let workspaces = vec![
+            workspace_entry("primary", "project", WorkspaceKind::Primary, "/tmp/repo"),
+            workspace_entry(
+                "worktree",
+                "project",
+                WorkspaceKind::Worktree,
+                "/tmp/repo/feature",
+            ),
+        ];
+
+        let store = SuperzetStore {
+            state_path: PathBuf::from("/tmp/state.json"),
+            state: SuperzetState {
+                active_project_id: None,
+                active_workspace_id: None,
+                projects: Vec::new(),
+                workspaces,
+                sessions: Vec::new(),
+                presets: default_presets(),
+            },
+        };
+
+        let workspace = store
+            .workspace_for_path_or_ancestor(Path::new("/tmp/repo/feature/src/main.rs"))
+            .expect("workspace should resolve");
+        assert_eq!(workspace.id, "worktree");
+    }
+
+    #[test]
+    fn startup_workspace_prefers_active_workspace() {
+        let store = SuperzetStore {
+            state_path: PathBuf::from("/tmp/state.json"),
+            state: SuperzetState {
+                active_project_id: Some("project".to_string()),
+                active_workspace_id: Some("worktree".to_string()),
+                projects: vec![project_entry("project", "/tmp/repo")],
+                workspaces: vec![
+                    workspace_entry("primary", "project", WorkspaceKind::Primary, "/tmp/repo"),
+                    workspace_entry(
+                        "worktree",
+                        "project",
+                        WorkspaceKind::Worktree,
+                        "/tmp/repo/feature",
+                    ),
+                ],
+                sessions: Vec::new(),
+                presets: default_presets(),
+            },
+        };
+
+        let workspace = store.startup_workspace().expect("workspace should resolve");
+        assert_eq!(workspace.id, "worktree");
+    }
+
+    #[test]
+    fn normalize_falls_back_to_first_project_primary_workspace() {
+        let mut store = SuperzetStore {
+            state_path: PathBuf::from("/tmp/state.json"),
+            state: SuperzetState {
+                active_project_id: Some("missing".to_string()),
+                active_workspace_id: Some("missing".to_string()),
+                projects: vec![
+                    project_entry("project-one", "/tmp/project-one"),
+                    project_entry("project-two", "/tmp/project-two"),
+                ],
+                workspaces: vec![
+                    workspace_entry(
+                        "project-two-worktree",
+                        "project-two",
+                        WorkspaceKind::Worktree,
+                        "/tmp/project-two/feature",
+                    ),
+                    workspace_entry(
+                        "project-one-primary",
+                        "project-one",
+                        WorkspaceKind::Primary,
+                        "/tmp/project-one",
+                    ),
+                    workspace_entry(
+                        "project-one-worktree",
+                        "project-one",
+                        WorkspaceKind::Worktree,
+                        "/tmp/project-one/feature",
+                    ),
+                ],
+                sessions: Vec::new(),
+                presets: default_presets(),
+            },
+        };
+
+        store.normalize();
+
+        assert_eq!(store.active_workspace_id(), Some("project-one-primary"));
+        assert_eq!(store.active_project_id(), Some("project-one"));
+        assert_eq!(
+            store.startup_workspace().map(|workspace| workspace.id.as_str()),
+            Some("project-one-primary")
+        );
+    }
 }

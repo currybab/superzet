@@ -1519,26 +1519,134 @@ pub(crate) async fn restore_or_create_workspace(
     } else if matches!(KEY_VALUE_STORE.read_kvp(FIRST_OPEN), Ok(None)) {
         cx.update(|cx| show_onboarding_view(app_state, cx)).await?;
     } else {
-        cx.update(|cx| {
-            workspace::open_new(
-                Default::default(),
-                app_state,
-                cx,
-                |workspace, window, cx| {
-                    let restore_on_startup = WorkspaceSettings::get_global(cx).restore_on_startup;
-                    match restore_on_startup {
-                        workspace::RestoreOnStartupBehavior::Launchpad => {}
-                        _ => {
-                            Editor::new_file(workspace, &Default::default(), window, cx);
+        let opened_startup_workspace =
+            restore_superzet_startup_workspace(app_state.clone(), cx).await?;
+
+        if !opened_startup_workspace {
+            cx.update(|cx| {
+                workspace::open_new(
+                    Default::default(),
+                    app_state,
+                    cx,
+                    |workspace, window, cx| {
+                        let restore_on_startup = WorkspaceSettings::get_global(cx).restore_on_startup;
+                        match restore_on_startup {
+                            workspace::RestoreOnStartupBehavior::Launchpad => {}
+                            _ => {
+                                Editor::new_file(workspace, &Default::default(), window, cx);
+                            }
                         }
-                    }
-                },
-            )
-        })
-        .await?;
+                    },
+                )
+            })
+            .await?;
+        }
     }
 
     Ok(())
+}
+
+async fn restore_superzet_startup_workspace(
+    app_state: Arc<AppState>,
+    cx: &mut AsyncApp,
+) -> Result<bool> {
+    let startup_workspace = cx.update(|cx| {
+        let store = superzet_model::SuperzetStore::global(cx);
+        store.read(cx).startup_workspace().map(|workspace| {
+            (workspace.id.clone(), workspace.worktree_path.clone())
+        })
+    });
+
+    let Some((workspace_id, worktree_path)) = startup_workspace else {
+        return Ok(false);
+    };
+
+    let session_handle = app_state.session.clone();
+    let (last_session_id, last_session_window_stack) = cx.update(|cx| {
+        let session = session_handle.read(cx);
+        (
+            session.last_session_id().map(|id| id.to_string()),
+            session.last_session_window_stack(),
+        )
+    });
+
+    if let Some(last_session_id) = last_session_id
+        && let Some(session_workspaces) = workspace::last_session_workspace_locations(
+            &last_session_id,
+            last_session_window_stack,
+            app_state.fs.as_ref(),
+        )
+        .await
+        && let Some(matching_workspace) = session_workspaces.iter().find(|session_workspace| {
+            matches!(
+                session_workspace.location,
+                SerializedWorkspaceLocation::Local
+            ) && session_workspace.paths.paths().iter().any(|path| path == &worktree_path)
+        })
+    {
+        let matching_group = if let Some(window_id) = matching_workspace.window_id {
+            session_workspaces
+                .into_iter()
+                .filter(|session_workspace| session_workspace.window_id == Some(window_id))
+                .collect::<Vec<_>>()
+        } else {
+            vec![matching_workspace.clone()]
+        };
+
+        if let Some(serialized_multi_workspace) = workspace::read_serialized_multi_workspaces(
+            matching_group,
+        )
+        .into_iter()
+        .next()
+        {
+            match restore_multiworkspace(serialized_multi_workspace, app_state.clone(), cx).await {
+                Ok(result) => {
+                    for error in result.errors {
+                        log::error!("Failed to restore startup workspace group item: {error:#}");
+                    }
+                    cx.update(|cx| {
+                        let store = superzet_model::SuperzetStore::global(cx);
+                        store.update(cx, |store, cx| {
+                            store.record_workspace_opened(&workspace_id, cx);
+                        });
+                    });
+                    return Ok(true);
+                }
+                Err(error) => {
+                    log::error!("Failed to restore startup workspace group: {error:#}");
+                }
+            }
+        }
+    }
+
+    match cx
+        .update(|cx| {
+            workspace::Workspace::new_local(
+                vec![worktree_path],
+                app_state.clone(),
+                None,
+                None,
+                None,
+                true,
+                cx,
+            )
+        })
+        .await
+    {
+        Ok(_) => {
+            cx.update(|cx| {
+                let store = superzet_model::SuperzetStore::global(cx);
+                store.update(cx, |store, cx| {
+                    store.record_workspace_opened(&workspace_id, cx);
+                });
+            });
+            Ok(true)
+        }
+        Err(error) => {
+            log::error!("Failed to open startup workspace: {error:#}");
+            Ok(false)
+        }
+    }
 }
 
 async fn restorable_workspaces(

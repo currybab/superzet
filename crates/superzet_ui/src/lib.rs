@@ -2,20 +2,25 @@ use anyhow::Result;
 use editor::{Editor, EditorEvent, actions::SelectAll};
 use git_ui::git_panel::GitPanel;
 use gpui::{
-    Action, AsyncWindowContext, ClickEvent, DismissEvent, Entity, EntityId, EventEmitter,
-    FocusHandle, Focusable, MouseButton, MouseDownEvent, PathPromptOptions, Point, PromptLevel,
-    Subscription, Task, WeakEntity, WindowHandle, actions, anchored, deferred,
+    Action, Animation, AnimationExt, AsyncWindowContext, ClickEvent, DismissEvent, Entity,
+    EntityId, EventEmitter, FocusHandle, Focusable, MouseButton, MouseDownEvent,
+    PathPromptOptions, Point, PromptLevel, Subscription, Task, WeakEntity, WindowHandle, actions,
+    anchored, deferred,
 };
 use menu;
 use project_panel::ProjectPanel;
-use std::{collections::BTreeSet, path::PathBuf, sync::Arc};
+use settings::Settings;
+use std::{collections::{BTreeMap, BTreeSet}, path::PathBuf, sync::Arc, time::Duration};
+use superzet_agent::{AGENT_TERMINAL_ID_ENV_VAR, AgentHookEvent, AgentHookEventType};
 use superzet_model::{
-    AgentPreset, ProjectEntry, SuperzetStore, TaskStatus, WorkspaceEntry, WorkspaceKind,
+    AgentPreset, ProjectEntry, SuperzetStore, TaskStatus, WorkspaceAttentionStatus, WorkspaceEntry,
+    WorkspaceKind, aggregate_workspace_attention_status,
 };
+use terminal::terminal_settings::{TerminalAgentNotificationMode, TerminalSettings};
 use terminal_view::{TerminalView, terminal_panel::TerminalPanel};
 use ui::{
-    Chip, ContextMenu, DropdownMenu, DropdownStyle, ListItem, Switch, SwitchLabelPosition, Tab,
-    ToggleState, Tooltip, prelude::*,
+    Chip, ContextMenu, DropdownMenu, DropdownStyle, Indicator, ListItem, Switch,
+    SwitchLabelPosition, Tab, ToggleState, Tooltip, prelude::*,
 };
 use workspace::{
     AppState as WorkspaceAppState, ModalView, MultiWorkspace, MultiWorkspaceEvent, OpenOptions,
@@ -46,7 +51,269 @@ enum RightSidebarTab {
     Files,
 }
 
+#[derive(Clone)]
+struct LiveTerminalAttention {
+    workspace_id: String,
+    status: WorkspaceAttentionStatus,
+}
+
+struct WorkspaceAttentionController {
+    store: Entity<SuperzetStore>,
+    terminal_ids_by_entity: BTreeMap<EntityId, String>,
+    live_terminal_attention: BTreeMap<String, LiveTerminalAttention>,
+    _hook_task: Task<Result<()>>,
+}
+
+impl WorkspaceAttentionController {
+    fn new(cx: &mut Context<Self>) -> Self {
+        let store = SuperzetStore::global(cx);
+        let hook_task = match superzet_agent::subscribe() {
+            Ok(receiver) => cx.spawn(async move |this, cx| {
+                while let Ok(event) = receiver.recv().await {
+                    this.update(cx, |this, cx| {
+                        this.handle_hook_event(event, cx);
+                    })?;
+                }
+                Ok(())
+            }),
+            Err(error) => {
+                log::error!("failed to subscribe to Superzet agent hooks: {error:#}");
+                Task::ready(Ok(()))
+            }
+        };
+
+        Self {
+            store,
+            terminal_ids_by_entity: BTreeMap::new(),
+            live_terminal_attention: BTreeMap::new(),
+            _hook_task: hook_task,
+        }
+    }
+
+    fn register_terminal<T>(
+        &mut self,
+        terminal: Entity<T>,
+        terminal_id: String,
+        cx: &mut Context<Self>,
+    ) where
+        T: 'static,
+    {
+        let entity_id = terminal.entity_id();
+        self.terminal_ids_by_entity
+            .insert(entity_id, terminal_id.clone());
+
+        cx.observe_release(&terminal, move |this, _, cx| {
+            this.unregister_terminal(&terminal_id, entity_id, cx);
+        })
+        .detach();
+    }
+
+    fn unregister_terminal(
+        &mut self,
+        terminal_id: &str,
+        entity_id: EntityId,
+        cx: &mut Context<Self>,
+    ) {
+        self.terminal_ids_by_entity.remove(&entity_id);
+        if let Some(live_attention) = self.live_terminal_attention.remove(terminal_id) {
+            self.recompute_workspace_attention(&live_attention.workspace_id, cx);
+        }
+    }
+
+    fn handle_hook_event(&mut self, event: AgentHookEvent, cx: &mut Context<Self>) {
+        let Some((workspace_id, workspace_name)) =
+            self.resolve_workspace_for_event(&event, cx).map(|workspace| {
+                (
+                    workspace.id.clone(),
+                    workspace_notification_title(&workspace),
+                )
+            })
+        else {
+            log::debug!("ignoring agent hook event without a matching workspace");
+            return;
+        };
+
+        match event.event_type {
+            AgentHookEventType::Start => {
+                self.live_terminal_attention.insert(
+                    event.terminal_id,
+                    LiveTerminalAttention {
+                        workspace_id: workspace_id.clone(),
+                        status: WorkspaceAttentionStatus::Working,
+                    },
+                );
+                self.store.update(cx, |store, cx| {
+                    store.set_workspace_attention(
+                        &workspace_id,
+                        WorkspaceAttentionStatus::Idle,
+                        false,
+                        None,
+                        cx,
+                    );
+                });
+                self.recompute_workspace_attention(&workspace_id, cx);
+            }
+            AgentHookEventType::PermissionRequest => {
+                self.live_terminal_attention.insert(
+                    event.terminal_id.clone(),
+                    LiveTerminalAttention {
+                        workspace_id: workspace_id.clone(),
+                        status: WorkspaceAttentionStatus::Permission,
+                    },
+                );
+                self.store.update(cx, |store, cx| {
+                    store.set_workspace_attention(
+                        &workspace_id,
+                        WorkspaceAttentionStatus::Idle,
+                        false,
+                        None,
+                        cx,
+                    );
+                });
+                self.recompute_workspace_attention(&workspace_id, cx);
+                self.maybe_show_native_notification(
+                    TerminalLifecycleNotification::PermissionRequest,
+                    &workspace_id,
+                    &workspace_name,
+                    cx,
+                );
+            }
+            AgentHookEventType::Stop => {
+                self.live_terminal_attention.remove(&event.terminal_id);
+
+                let review_pending = !self.workspace_is_visible(&workspace_id, cx);
+                self.store.update(cx, |store, cx| {
+                    store.set_workspace_attention(
+                        &workspace_id,
+                        WorkspaceAttentionStatus::Idle,
+                        review_pending,
+                        review_pending.then(|| "Agent task completed".to_string()),
+                        cx,
+                    );
+                });
+                self.recompute_workspace_attention(&workspace_id, cx);
+
+                if review_pending {
+                    self.maybe_show_native_notification(
+                        TerminalLifecycleNotification::Completed,
+                        &workspace_id,
+                        &workspace_name,
+                        cx,
+                    );
+                }
+            }
+        }
+    }
+
+    fn resolve_workspace_for_event(
+        &self,
+        event: &AgentHookEvent,
+        cx: &App,
+    ) -> Option<WorkspaceEntry> {
+        let store = self.store.read(cx);
+        if let Some(workspace_id) = event.workspace_id.as_deref() {
+            return store.workspace(workspace_id).cloned();
+        }
+
+        event.cwd
+            .as_deref()
+            .and_then(|cwd| store.workspace_for_path_or_ancestor(cwd).cloned())
+    }
+
+    fn recompute_workspace_attention(&mut self, workspace_id: &str, cx: &mut Context<Self>) {
+        let live_attention_status = self
+            .live_terminal_attention
+            .values()
+            .filter(|attention| attention.workspace_id == workspace_id)
+            .map(|attention| attention.status.clone())
+            .max_by_key(attention_priority);
+        let review_pending = self
+            .store
+            .read(cx)
+            .workspace(workspace_id)
+            .map(|workspace| workspace.review_pending)
+            .unwrap_or(false);
+        let attention_status =
+            aggregate_workspace_attention_status(live_attention_status, review_pending);
+
+        self.store.update(cx, |store, cx| {
+            let reason = if attention_status == WorkspaceAttentionStatus::Review {
+                Some("Agent task completed".to_string())
+            } else {
+                None
+            };
+            store.set_workspace_attention(
+                workspace_id,
+                attention_status,
+                review_pending,
+                reason,
+                cx,
+            );
+        });
+    }
+
+    fn workspace_is_visible(&self, workspace_id: &str, cx: &App) -> bool {
+        cx.active_window().is_some()
+            && self.store.read(cx).active_workspace_id() == Some(workspace_id)
+    }
+
+    fn maybe_show_native_notification(
+        &self,
+        notification: TerminalLifecycleNotification,
+        workspace_id: &str,
+        workspace_name: &str,
+        cx: &mut Context<Self>,
+    ) {
+        let mode = TerminalSettings::get_global(cx).agent_notifications;
+        if !should_show_native_notification(mode, workspace_id, &self.store, cx) {
+            return;
+        }
+
+        let title = notification.title().to_string();
+        let body = format!("{workspace_name} in superzet");
+
+        cx.background_spawn(async move {
+            dispatch_native_terminal_notification(&title, &body);
+        })
+        .detach();
+    }
+}
+
+#[derive(Clone, Copy)]
+enum TerminalLifecycleNotification {
+    Completed,
+    PermissionRequest,
+}
+
+impl TerminalLifecycleNotification {
+    fn title(self) -> &'static str {
+        match self {
+            Self::Completed => "Agent task finished",
+            Self::PermissionRequest => "Agent needs approval",
+        }
+    }
+}
+
 pub fn init(cx: &mut App) {
+    let attention_controller = cx.new(WorkspaceAttentionController::new);
+
+    cx.observe_new(move |terminal_view: &mut TerminalView, _window, cx: &mut Context<TerminalView>| {
+        let Some(terminal_id) = terminal_view
+            .terminal()
+            .read(cx)
+            .env_var(AGENT_TERMINAL_ID_ENV_VAR)
+            .map(str::to_string)
+        else {
+            return;
+        };
+
+        let terminal = terminal_view.terminal().clone();
+        attention_controller.update(cx, |controller, cx| {
+            controller.register_terminal(terminal, terminal_id, cx);
+        });
+    })
+    .detach();
+
     cx.observe_new(|pane: &mut Pane, _window, cx: &mut Context<Pane>| {
         let pane_handle = cx.entity();
         let pane_id = pane_handle.entity_id();
@@ -106,14 +373,22 @@ fn render_terminal_preset_bar(
     cx: &mut Context<Pane>,
 ) -> Option<AnyElement> {
     let workspace_handle = pane.workspace()?;
-    pane.active_item_as::<TerminalView>()?;
-
     let workspace_path = workspace_root_path(&workspace_handle, cx)?;
     let store = SuperzetStore::global(cx);
     let (workspace_entry, presets) = {
         let store = store.read(cx);
+        let workspace_entry = store
+            .workspace_for_path_or_ancestor(&workspace_path)
+            .or_else(|| {
+                store.active_workspace().filter(|workspace| {
+                    workspace_path.starts_with(&workspace.worktree_path)
+                        || workspace.worktree_path.starts_with(&workspace_path)
+                })
+            })?
+            .clone();
+
         (
-            store.workspace_for_path(&workspace_path)?.clone(),
+            workspace_entry,
             store.presets().to_vec(),
         )
     };
@@ -183,8 +458,6 @@ fn render_workspace_preset_button(
     _window: &mut Window,
     _cx: &mut Context<Pane>,
 ) -> AnyElement {
-    let is_selected = workspace_entry.agent_preset_id == preset.id;
-
     Button::new(
         format!(
             "superzet-preset-button-{}-{}",
@@ -194,8 +467,6 @@ fn render_workspace_preset_button(
     )
     .label_size(LabelSize::Small)
     .style(ButtonStyle::Subtle)
-    .toggle_state(is_selected)
-    .selected_style(ButtonStyle::Filled)
     .on_click(move |_, window, cx| {
         launch_workspace_preset(
             workspace_handle.clone(),
@@ -345,7 +616,22 @@ fn launch_workspace_preset(
     };
 
     let spawn_in_terminal =
-        superzet_agent::spawn_for_workspace(&workspace_entry, &session, &preset);
+        match superzet_agent::spawn_for_workspace(&workspace_entry, &session, &preset) {
+            Ok(spawn_in_terminal) => spawn_in_terminal,
+            Err(error) => {
+                let reason = format!("Failed to prepare {}: {error}", preset.label);
+                store.update(cx, |store, cx| {
+                    store.update_session_status(
+                        &session.id,
+                        TaskStatus::Failed,
+                        Some(reason.clone()),
+                        cx,
+                    );
+                });
+                show_workspace_toast(&workspace_handle, reason, cx);
+                return;
+            }
+        };
     let spawn_task = terminal_panel.update(cx, |terminal_panel, cx| {
         terminal_panel.spawn_task(&spawn_in_terminal, window, cx)
     });
@@ -1446,6 +1732,7 @@ impl SuperzetSidebar {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let selected = self.store.read(cx).active_workspace_id() == Some(workspace.id.as_str());
+        let attention_status = workspace.attention_status.clone();
         let workspace_for_open = workspace.clone();
         let workspace_for_delete = workspace.clone();
         let workspace_for_menu = workspace.clone();
@@ -1474,12 +1761,20 @@ impl SuperzetSidebar {
                             .indent_level(1)
                             .spacing(ui::ListItemSpacing::Dense)
                             .rounded()
-                            .start_slot(h_flex().gap_1().items_center().child(Icon::new(
-                                match workspace.kind {
-                                    WorkspaceKind::Primary => IconName::Folder,
-                                    WorkspaceKind::Worktree => IconName::GitBranch,
-                                },
-                            )))
+                            .start_slot(
+                                h_flex()
+                                    .gap_1()
+                                    .items_center()
+                                    .child(render_workspace_attention_indicator(
+                                        &workspace.id,
+                                        &attention_status,
+                                        cx,
+                                    ))
+                                    .child(Icon::new(match workspace.kind {
+                                        WorkspaceKind::Primary => IconName::Folder,
+                                        WorkspaceKind::Worktree => IconName::GitBranch,
+                                    })),
+                            )
                             .when(workspace.managed, |this| {
                                 this.end_hover_slot(
                                     IconButton::new(
@@ -1977,8 +2272,9 @@ impl WorkspaceSidebar for SuperzetSidebar {
     }
 
     fn has_notifications(&self, cx: &App) -> bool {
-        let _ = cx;
-        false
+        self.store.read(cx).workspaces().iter().any(|workspace| {
+            workspace.attention_status != WorkspaceAttentionStatus::Idle
+        })
     }
 }
 
@@ -2927,6 +3223,111 @@ fn workspace_root_path(workspace: &Entity<Workspace>, cx: &App) -> Option<std::p
             .as_local()
             .map(|local| local.abs_path().to_path_buf())
     })
+}
+
+fn attention_priority(status: &WorkspaceAttentionStatus) -> u8 {
+    match status {
+        WorkspaceAttentionStatus::Idle => 0,
+        WorkspaceAttentionStatus::Review => 1,
+        WorkspaceAttentionStatus::Working => 2,
+        WorkspaceAttentionStatus::Permission => 3,
+    }
+}
+
+fn render_workspace_attention_indicator(
+    workspace_id: &str,
+    attention_status: &WorkspaceAttentionStatus,
+    _cx: &mut Context<SuperzetSidebar>,
+) -> AnyElement {
+    match attention_status {
+        WorkspaceAttentionStatus::Idle => div()
+            .w_3()
+            .items_center()
+            .justify_center()
+            .opacity(0.)
+            .child(Indicator::dot().color(Color::Muted))
+            .into_any_element(),
+        WorkspaceAttentionStatus::Review => div()
+            .w_3()
+            .items_center()
+            .justify_center()
+            .child(Indicator::dot().color(Color::Success))
+            .into_any_element(),
+        WorkspaceAttentionStatus::Working => div()
+            .w_3()
+            .items_center()
+            .justify_center()
+            .child(Indicator::dot().color(Color::Warning))
+            .with_animation(
+                gpui::ElementId::from(SharedString::from(format!(
+                    "superzet-working-indicator-{workspace_id}"
+                ))),
+                Animation::new(Duration::from_millis(900)).repeat(),
+                |indicator: gpui::Div, delta: f32| {
+                    let alpha = 0.35 + (delta * std::f32::consts::PI).sin().abs() * 0.65;
+                    indicator.opacity(alpha)
+                },
+            )
+            .into_any_element(),
+        WorkspaceAttentionStatus::Permission => div()
+            .w_3()
+            .items_center()
+            .justify_center()
+            .child(Indicator::dot().color(Color::Error))
+            .with_animation(
+                gpui::ElementId::from(SharedString::from(format!(
+                    "superzet-permission-indicator-{workspace_id}"
+                ))),
+                Animation::new(Duration::from_millis(650)).repeat(),
+                |indicator: gpui::Div, delta: f32| {
+                    let alpha = 0.4 + (delta * std::f32::consts::PI).sin().abs() * 0.6;
+                    indicator.opacity(alpha)
+                },
+            )
+            .into_any_element(),
+    }
+}
+
+fn should_show_native_notification(
+    mode: TerminalAgentNotificationMode,
+    workspace_id: &str,
+    store: &Entity<SuperzetStore>,
+    cx: &App,
+) -> bool {
+    match mode {
+        TerminalAgentNotificationMode::Off => false,
+        TerminalAgentNotificationMode::Always => true,
+        TerminalAgentNotificationMode::AppBackground => cx.active_window().is_none(),
+        TerminalAgentNotificationMode::WorkspaceHidden => {
+            cx.active_window().is_none()
+                || store.read(cx).active_workspace_id() != Some(workspace_id)
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn dispatch_native_terminal_notification(title: &str, body: &str) {
+    let title = title.replace('\\', "\\\\").replace('"', "\\\"");
+    let body = body.replace('\\', "\\\\").replace('"', "\\\"");
+    let script = format!("display notification \"{body}\" with title \"{title}\"");
+
+    if let Err(error) = std::process::Command::new("/usr/bin/osascript")
+        .arg("-e")
+        .arg(script)
+        .spawn()
+    {
+        log::error!("failed to dispatch macOS notification: {error}");
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn dispatch_native_terminal_notification(_title: &str, _body: &str) {}
+
+fn workspace_notification_title(workspace: &WorkspaceEntry) -> String {
+    match workspace.kind {
+        WorkspaceKind::Primary => workspace.name.clone(),
+        WorkspaceKind::Worktree => workspace_sidebar_title(workspace),
+    }
 }
 
 fn workspace_metadata_chips(workspace: &WorkspaceEntry) -> Vec<gpui::AnyElement> {

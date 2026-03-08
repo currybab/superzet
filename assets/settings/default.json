@@ -1712,6 +1712,9 @@
     "keep_selection_on_copy": true,
     // Whether to show the terminal button in the status bar
     "button": true,
+    // When to show native notifications for managed Codex and Claude terminal activity.
+    // Values: "off", "app_background", "workspace_hidden", "always"
+    "agent_notifications": "always",
     // Any key-value pairs added to this list will be added to the terminal's
     // environment. Use `:` to separate multiple values.
     "env": {

@@ -132,6 +132,9 @@ impl Project {
         cx.spawn(async move |project, cx| {
             let mut env = env_task.await.unwrap_or_default();
             env.extend(settings.env);
+            if remote_client.is_none() {
+                maybe_inject_superzet_agent_environment(&mut env);
+            }
 
             let activation_script = maybe!(async {
                 for toolchain in toolchains {
@@ -375,6 +378,9 @@ impl Project {
             let shell_kind = ShellKind::new(&shell, path_style.is_windows());
             let mut env = env_task.await.unwrap_or_default();
             env.extend(settings.env);
+            if remote_client.is_none() {
+                maybe_inject_superzet_agent_environment(&mut env);
+            }
 
             let activation_script = maybe!(async {
                 for toolchain in toolchains {
@@ -601,6 +607,12 @@ impl Project {
         } else {
             Task::ready(None).shared()
         }
+    }
+}
+
+fn maybe_inject_superzet_agent_environment(env: &mut HashMap<String, String>) {
+    if let Err(error) = superzet_agent::inject_terminal_environment(env) {
+        log::error!("failed to prepare Superzet agent terminal environment: {error:#}");
     }
 }
 

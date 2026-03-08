@@ -2200,6 +2200,10 @@ impl Terminal {
         self.task.as_ref()
     }
 
+    pub fn env_var(&self, key: &str) -> Option<&str> {
+        self.template.env.get(key).map(String::as_str)
+    }
+
     pub fn wait_for_completed_task(&self, cx: &App) -> Task<Option<ExitStatus>> {
         if let Some(task) = self.task() {
             if task.status == TaskStatus::Running {

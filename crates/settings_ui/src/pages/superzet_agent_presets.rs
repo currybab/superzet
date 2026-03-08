@@ -201,6 +201,8 @@ impl AgentPresetsPage {
         );
 
         v_flex()
+            .min_w_0()
+            .w_full()
             .gap_3()
             .p_4()
             .border_1()
@@ -209,11 +211,14 @@ impl AgentPresetsPage {
             .bg(cx.theme().colors().editor_background)
             .child(
                 h_flex()
+                    .min_w_0()
+                    .w_full()
                     .items_center()
                     .justify_between()
                     .gap_2()
                     .child(
                         v_flex()
+                            .flex_1()
                             .gap_0p5()
                             .min_w_0()
                             .child(Label::new(preset.label.clone()).size(LabelSize::Small))
@@ -362,9 +367,13 @@ impl Render for AgentPresetsPage {
         let presets = self.store.read(cx).presets().to_vec();
 
         v_flex()
+            .min_w_0()
+            .w_full()
             .gap_4()
             .child(
                 v_flex()
+                    .min_w_0()
+                    .w_full()
                     .gap_1()
                     .child(Label::new("Agent Presets").size(LabelSize::Large))
                     .child(
@@ -384,6 +393,7 @@ impl Render for AgentPresetsPage {
             })
             .child(
                 h_flex()
+                    .w_full()
                     .justify_end()
                     .child(
                         Button::new("superzet-add-preset", "Add Preset")
@@ -414,6 +424,8 @@ fn render_field(
     editor: Entity<Editor>,
 ) -> AnyElement {
     v_flex()
+        .min_w_0()
+        .w_full()
         .gap_1()
         .child(Label::new(title).size(LabelSize::Small))
         .when_some(description, |this, description| {
@@ -423,7 +435,7 @@ fn render_field(
                     .color(Color::Muted),
             )
         })
-        .child(editor)
+        .child(div().min_w_0().w_full().child(editor))
         .into_any_element()
 }
 

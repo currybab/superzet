@@ -128,6 +128,10 @@ pub struct TerminalSettingsContent {
     ///
     /// Default: true
     pub button: Option<bool>,
+    /// When to show native notifications for managed CLI agents running in terminals.
+    ///
+    /// Default: always
+    pub agent_notifications: Option<TerminalAgentNotificationMode>,
     pub dock: Option<TerminalDockPosition>,
     /// Default width when the terminal is docked to the left or right.
     ///
@@ -171,6 +175,22 @@ pub struct TerminalSettingsContent {
     /// Default: 45
     #[serde(serialize_with = "crate::serialize_optional_f32_with_two_decimal_places")]
     pub minimum_contrast: Option<f32>,
+}
+
+#[derive(
+    Clone, Copy, Debug, Default, Serialize, Deserialize, JsonSchema, MergeFrom, PartialEq, Eq,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum TerminalAgentNotificationMode {
+    /// Never show a native notification for terminal agent lifecycle events.
+    Off,
+    /// Show notifications only when the app has no active window.
+    AppBackground,
+    /// Show notifications when the target workspace is not currently visible.
+    WorkspaceHidden,
+    /// Always show notifications for supported events.
+    #[default]
+    Always,
 }
 
 /// Shell configuration to open the terminal with.
