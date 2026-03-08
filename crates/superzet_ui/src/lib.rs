@@ -3,14 +3,18 @@ use editor::{Editor, EditorEvent, actions::SelectAll};
 use git_ui::git_panel::GitPanel;
 use gpui::{
     Action, Animation, AnimationExt, AsyncWindowContext, ClickEvent, DismissEvent, Entity,
-    EntityId, EventEmitter, FocusHandle, Focusable, MouseButton, MouseDownEvent,
-    PathPromptOptions, Point, PromptLevel, Subscription, Task, WeakEntity, WindowHandle, actions,
-    anchored, deferred,
+    EntityId, EventEmitter, FocusHandle, Focusable, MouseButton, MouseDownEvent, PathPromptOptions,
+    Point, PromptLevel, Subscription, Task, WeakEntity, WindowHandle, actions, anchored, deferred,
 };
 use menu;
 use project_panel::ProjectPanel;
 use settings::Settings;
-use std::{collections::{BTreeMap, BTreeSet}, path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::PathBuf,
+    sync::Arc,
+    time::Duration,
+};
 use superzet_agent::{AGENT_TERMINAL_ID_ENV_VAR, AgentHookEvent, AgentHookEventType};
 use superzet_model::{
     AgentPreset, ProjectEntry, SuperzetStore, TaskStatus, WorkspaceAttentionStatus, WorkspaceEntry,
@@ -19,8 +23,7 @@ use superzet_model::{
 use terminal::terminal_settings::{TerminalAgentNotificationMode, TerminalSettings};
 use terminal_view::{TerminalView, terminal_panel::TerminalPanel};
 use ui::{
-    Chip, ContextMenu, DropdownMenu, DropdownStyle, Indicator, ListItem, Switch,
-    SwitchLabelPosition, Tab, ToggleState, Tooltip, prelude::*,
+    Chip, ContextMenu, DropdownMenu, DropdownStyle, Indicator, ListItem, Tab, Tooltip, prelude::*,
 };
 use workspace::{
     AppState as WorkspaceAppState, ModalView, MultiWorkspace, MultiWorkspaceEvent, OpenOptions,
@@ -121,8 +124,9 @@ impl WorkspaceAttentionController {
     }
 
     fn handle_hook_event(&mut self, event: AgentHookEvent, cx: &mut Context<Self>) {
-        let Some((workspace_id, workspace_name)) =
-            self.resolve_workspace_for_event(&event, cx).map(|workspace| {
+        let Some((workspace_id, workspace_name)) = self
+            .resolve_workspace_for_event(&event, cx)
+            .map(|workspace| {
                 (
                     workspace.id.clone(),
                     workspace_notification_title(&workspace),
@@ -215,7 +219,8 @@ impl WorkspaceAttentionController {
             return store.workspace(workspace_id).cloned();
         }
 
-        event.cwd
+        event
+            .cwd
             .as_deref()
             .and_then(|cwd| store.workspace_for_path_or_ancestor(cwd).cloned())
     }
@@ -297,21 +302,23 @@ impl TerminalLifecycleNotification {
 pub fn init(cx: &mut App) {
     let attention_controller = cx.new(WorkspaceAttentionController::new);
 
-    cx.observe_new(move |terminal_view: &mut TerminalView, _window, cx: &mut Context<TerminalView>| {
-        let Some(terminal_id) = terminal_view
-            .terminal()
-            .read(cx)
-            .env_var(AGENT_TERMINAL_ID_ENV_VAR)
-            .map(str::to_string)
-        else {
-            return;
-        };
+    cx.observe_new(
+        move |terminal_view: &mut TerminalView, _window, cx: &mut Context<TerminalView>| {
+            let Some(terminal_id) = terminal_view
+                .terminal()
+                .read(cx)
+                .env_var(AGENT_TERMINAL_ID_ENV_VAR)
+                .map(str::to_string)
+            else {
+                return;
+            };
 
-        let terminal = terminal_view.terminal().clone();
-        attention_controller.update(cx, |controller, cx| {
-            controller.register_terminal(terminal, terminal_id, cx);
-        });
-    })
+            let terminal = terminal_view.terminal().clone();
+            attention_controller.update(cx, |controller, cx| {
+                controller.register_terminal(terminal, terminal_id, cx);
+            });
+        },
+    )
     .detach();
 
     cx.observe_new(|pane: &mut Pane, _window, cx: &mut Context<Pane>| {
@@ -387,10 +394,7 @@ fn render_terminal_preset_bar(
             })?
             .clone();
 
-        (
-            workspace_entry,
-            store.presets().to_vec(),
-        )
+        (workspace_entry, store.presets().to_vec())
     };
 
     let (visible_presets, hidden_presets) =
@@ -818,25 +822,24 @@ fn spawn_new_workspace_request(
     workspace_handle: Entity<Workspace>,
     app_state: Arc<WorkspaceAppState>,
     project: ProjectEntry,
-    display_name: Option<String>,
-    preset_id: String,
-    task_prompt: Option<String>,
-    run_setup: bool,
+    branch_name: String,
     window: &mut Window,
     cx: &mut App,
 ) {
     let store = SuperzetStore::global(cx);
+    let preset_id = store.read(cx).default_preset().id.clone();
     window
         .spawn(cx, async move |cx| {
             let outcome = cx
                 .background_spawn({
                     let project = project.clone();
+                    let branch_name = branch_name.clone();
                     let preset_id = preset_id.clone();
                     async move {
                         superzet_git::create_workspace(
                             &project,
                             &preset_id,
-                            superzet_git::CreateWorkspaceOptions { run_setup },
+                            superzet_git::CreateWorkspaceOptions { branch_name },
                         )
                     }
                 })
@@ -854,12 +857,7 @@ fn spawn_new_workspace_request(
                 }
             };
 
-            let mut workspace_entry = outcome.workspace.clone();
-            workspace_entry.display_name = display_name
-                .map(|display_name| display_name.trim().to_string())
-                .filter(|display_name| {
-                    !display_name.is_empty() && display_name != &workspace_entry.name
-                });
+            let workspace_entry = outcome.workspace.clone();
 
             if update_store_async(&store, cx, |store, cx| {
                 store.upsert_workspace(workspace_entry.clone(), cx);
@@ -895,7 +893,7 @@ fn spawn_new_workspace_request(
                         target_workspace,
                         workspace_entry.clone(),
                         preset_id.clone(),
-                        task_prompt.clone(),
+                        None,
                         window,
                         cx,
                     );
@@ -938,11 +936,7 @@ fn workspace_for_path_in_window(
 struct NewWorkspaceModal {
     workspace: WeakEntity<Workspace>,
     project: ProjectEntry,
-    store: Entity<SuperzetStore>,
-    display_name_editor: Entity<Editor>,
-    task_prompt_editor: Entity<Editor>,
-    selected_preset_id: String,
-    run_setup: ToggleState,
+    branch_name_editor: Entity<Editor>,
     last_error: Option<SharedString>,
 }
 
@@ -951,7 +945,7 @@ impl ModalView for NewWorkspaceModal {}
 
 impl Focusable for NewWorkspaceModal {
     fn focus_handle(&self, cx: &App) -> FocusHandle {
-        self.display_name_editor.focus_handle(cx)
+        self.branch_name_editor.focus_handle(cx)
     }
 }
 
@@ -962,27 +956,16 @@ impl NewWorkspaceModal {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let store = SuperzetStore::global(cx);
-        let selected_preset_id = store.read(cx).default_preset().id.clone();
-        let display_name_editor = cx.new(|cx| {
+        let branch_name_editor = cx.new(|cx| {
             let mut editor = Editor::single_line(window, cx);
-            editor.set_placeholder_text("Feature workspace", window, cx);
-            editor
-        });
-        let task_prompt_editor = cx.new(|cx| {
-            let mut editor = Editor::auto_height(3, 8, window, cx);
-            editor.set_placeholder_text("Optional prompt to send after launch", window, cx);
+            editor.set_placeholder_text("feature/my-branch", window, cx);
             editor
         });
 
         Self {
             workspace,
             project,
-            store,
-            display_name_editor,
-            task_prompt_editor,
-            selected_preset_id,
-            run_setup: ToggleState::Selected,
+            branch_name_editor,
             last_error: None,
         }
     }
@@ -998,81 +981,37 @@ impl NewWorkspaceModal {
             return;
         };
 
-        if self
-            .store
-            .read(cx)
-            .preset(&self.selected_preset_id)
-            .is_none()
-        {
-            self.last_error = Some("Select a valid preset.".into());
+        let branch_name = self.branch_name_editor.read(cx).text(cx);
+        let branch_name = branch_name.trim().to_string();
+        if branch_name.is_empty() {
+            self.last_error = Some("Enter a branch name.".into());
             cx.notify();
             return;
         }
 
         let app_state = workspace_handle.read(cx).app_state().clone();
-        let display_name = self.display_name_editor.read(cx).text(cx);
-        let task_prompt = self.task_prompt_editor.read(cx).text(cx);
-        let display_name = (!display_name.trim().is_empty()).then_some(display_name);
-        let task_prompt = (!task_prompt.trim().is_empty()).then_some(task_prompt);
-        let run_setup = self.run_setup == ToggleState::Selected;
 
         spawn_new_workspace_request(
             workspace_handle,
             app_state,
             self.project.clone(),
-            display_name,
-            self.selected_preset_id.clone(),
-            task_prompt,
-            run_setup,
+            branch_name,
             window,
             cx,
         );
 
         cx.emit(DismissEvent);
     }
-
-    fn select_preset(&mut self, preset_id: String, cx: &mut Context<Self>) {
-        if self.selected_preset_id != preset_id {
-            self.selected_preset_id = preset_id;
-            self.last_error = None;
-            cx.notify();
-        }
-    }
 }
 
 impl Render for NewWorkspaceModal {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let presets = self.store.read(cx).presets().to_vec();
-        let modal_for_menu = cx.entity().downgrade();
-        let modal_for_switch = cx.entity().downgrade();
-        let selected_label = presets
-            .iter()
-            .find(|preset| preset.id == self.selected_preset_id)
-            .map(|preset| preset.label.clone())
-            .unwrap_or_else(|| "Select preset".to_string());
-        let preset_menu = ContextMenu::build(window, cx, move |mut menu, _, _| {
-            for preset in &presets {
-                let preset_id = preset.id.clone();
-                let label = preset.label.clone();
-                menu = menu.entry(label, None, {
-                    let modal = modal_for_menu.clone();
-                    move |_, cx| {
-                        modal
-                            .update(cx, |this, cx| this.select_preset(preset_id.clone(), cx))
-                            .ok();
-                    }
-                });
-            }
-
-            menu
-        });
-
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         v_flex()
             .key_context("SuperzetNewWorkspaceModal")
             .on_action(cx.listener(Self::cancel))
             .on_action(cx.listener(Self::confirm))
             .elevation_3(cx)
-            .w(px(560.))
+            .w(px(480.))
             .overflow_hidden()
             .bg(cx.theme().colors().editor_background)
             .border_1()
@@ -1098,43 +1037,8 @@ impl Render for NewWorkspaceModal {
                     .child(
                         v_flex()
                             .gap_1()
-                            .child(Label::new("Display Name").size(LabelSize::Small))
-                            .child(self.display_name_editor.clone()),
-                    )
-                    .child(
-                        v_flex()
-                            .gap_1()
-                            .child(Label::new("Agent Preset").size(LabelSize::Small))
-                            .child(
-                                DropdownMenu::new(
-                                    format!("superzet-new-workspace-preset-{}", self.project.id),
-                                    selected_label,
-                                    preset_menu,
-                                )
-                                .style(DropdownStyle::Outlined),
-                            ),
-                    )
-                    .child(
-                        v_flex()
-                            .gap_1()
-                            .child(Label::new("Task Prompt").size(LabelSize::Small))
-                            .child(self.task_prompt_editor.clone()),
-                    )
-                    .child(
-                        Switch::new("superzet-run-setup", self.run_setup)
-                            .label("Run setup hooks")
-                            .label_position(SwitchLabelPosition::Start)
-                            .on_click({
-                                let modal = modal_for_switch.clone();
-                                move |toggle_state, _, cx| {
-                                    modal
-                                        .update(cx, |this, cx| {
-                                            this.run_setup = *toggle_state;
-                                            cx.notify();
-                                        })
-                                        .ok();
-                                }
-                            }),
+                            .child(Label::new("Branch Name").size(LabelSize::Small))
+                            .child(self.branch_name_editor.clone()),
                     )
                     .when_some(self.last_error.clone(), |this, error| {
                         this.child(Label::new(error).size(LabelSize::Small).color(Color::Error))
@@ -2095,7 +1999,8 @@ impl Render for SuperzetEmptyPaneView {
                     true,
                     |this, window, cx| {
                         this.focus_pane(window, cx);
-                        window.dispatch_action(Box::new(workspace::NewTerminal::default()), cx);
+                        window
+                            .dispatch_action(Box::new(workspace::NewCenterTerminal::default()), cx);
                     },
                     cx,
                 ),
@@ -2272,9 +2177,11 @@ impl WorkspaceSidebar for SuperzetSidebar {
     }
 
     fn has_notifications(&self, cx: &App) -> bool {
-        self.store.read(cx).workspaces().iter().any(|workspace| {
-            workspace.attention_status != WorkspaceAttentionStatus::Idle
-        })
+        self.store
+            .read(cx)
+            .workspaces()
+            .iter()
+            .any(|workspace| workspace.attention_status != WorkspaceAttentionStatus::Idle)
     }
 }
 

@@ -452,7 +452,7 @@ pub struct ToggleFileFinder {
     pub separate_history: bool,
 }
 
-/// Opens a new terminal in the center.
+/// Opens a new terminal in the center pane.
 #[derive(Default, PartialEq, Eq, Clone, Deserialize, JsonSchema, Action)]
 #[action(namespace = workspace)]
 #[serde(deny_unknown_fields)]
@@ -462,7 +462,7 @@ pub struct NewCenterTerminal {
     pub local: bool,
 }
 
-/// Opens a new terminal.
+/// Opens a new terminal in the terminal panel.
 #[derive(Default, PartialEq, Eq, Clone, Deserialize, JsonSchema, Action)]
 #[action(namespace = workspace)]
 #[serde(deny_unknown_fields)]

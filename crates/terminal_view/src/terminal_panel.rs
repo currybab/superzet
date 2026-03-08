@@ -641,23 +641,39 @@ impl TerminalPanel {
         }
     }
 
-    /// Create a new Terminal in the current working directory or the user's home directory
+    fn new_terminal_task(
+        workspace: &mut Workspace,
+        action: &workspace::NewTerminal,
+        window: &mut Window,
+        cx: &mut Context<Workspace>,
+    ) -> Option<Task<Result<WeakEntity<Terminal>>>> {
+        let local = action.local;
+        let working_directory = default_working_directory(workspace, cx);
+        let terminal_panel = workspace.panel::<Self>(cx)?;
+
+        Some(terminal_panel.update(cx, |terminal_panel, cx| {
+            terminal_panel.add_terminal_shell_internal(
+                local,
+                working_directory,
+                RevealStrategy::Always,
+                window,
+                cx,
+            )
+        }))
+    }
+
+    /// Create a new terminal in the terminal panel using the current working directory or home.
     fn new_terminal(
         workspace: &mut Workspace,
         action: &workspace::NewTerminal,
         window: &mut Window,
         cx: &mut Context<Workspace>,
     ) {
-        let local = action.local;
-        let working_directory = default_working_directory(workspace, cx);
-        Self::add_center_terminal(workspace, window, cx, move |project, cx| {
-            if local {
-                project.create_local_terminal(cx)
-            } else {
-                project.create_terminal_shell(working_directory, cx)
-            }
-        })
-        .detach_and_log_err(cx);
+        let Some(task) = Self::new_terminal_task(workspace, action, window, cx) else {
+            return;
+        };
+
+        task.detach_and_log_err(cx);
     }
 
     fn terminals_for_task(
@@ -1778,6 +1794,127 @@ mod tests {
             item_count, 5,
             "Terminal panel should bypass max_tabs limit and have all 5 terminals"
         );
+    }
+
+    #[gpui::test]
+    async fn test_new_terminal_action_opens_in_terminal_panel(cx: &mut TestAppContext) {
+        cx.executor().allow_parking();
+        init_test(cx);
+        cx.update(|cx| {
+            SettingsStore::update_global(cx, |store, cx| {
+                store.update_user_settings(cx, |settings| {
+                    settings.terminal.get_or_insert_default().project.shell =
+                        Some(settings::Shell::Program("/bin/sh".to_owned()));
+                });
+            });
+        });
+
+        let fs = FakeFs::new(cx.executor());
+        let project = Project::test(fs, [], cx).await;
+        let window_handle =
+            cx.add_window(|window, cx| MultiWorkspace::test_new(project, window, cx));
+
+        let (workspace, terminal_panel) = window_handle
+            .update(cx, |multi_workspace, window, cx| {
+                let workspace = multi_workspace.workspace().clone();
+                let terminal_panel = workspace.update(cx, |workspace, cx| {
+                    let terminal_panel = cx.new(|cx| TerminalPanel::new(workspace, window, cx));
+                    workspace.add_panel(terminal_panel.clone(), window, cx);
+                    terminal_panel
+                });
+                (workspace, terminal_panel)
+            })
+            .unwrap();
+
+        let task = window_handle
+            .update(cx, |_, window, cx| {
+                workspace.update(cx, |workspace, cx| {
+                    TerminalPanel::new_terminal_task(
+                        workspace,
+                        &workspace::NewTerminal { local: true },
+                        window,
+                        cx,
+                    )
+                    .expect("terminal panel should be registered")
+                })
+            })
+            .unwrap();
+
+        task.await.unwrap();
+
+        workspace.read_with(cx, |workspace, cx| {
+            assert_eq!(workspace.active_pane().read(cx).items_len(), 0);
+        });
+        terminal_panel.read_with(cx, |terminal_panel, cx| {
+            assert_eq!(terminal_panel.active_pane.read(cx).items_len(), 1);
+            assert!(
+                terminal_panel
+                    .active_pane
+                    .read(cx)
+                    .items()
+                    .any(|item| item.downcast::<TerminalView>().is_some())
+            );
+        });
+    }
+
+    #[gpui::test]
+    async fn test_new_center_terminal_action_opens_in_center_pane(cx: &mut TestAppContext) {
+        cx.executor().allow_parking();
+        init_test(cx);
+        cx.update(|cx| {
+            SettingsStore::update_global(cx, |store, cx| {
+                store.update_user_settings(cx, |settings| {
+                    settings.terminal.get_or_insert_default().project.shell =
+                        Some(settings::Shell::Program("/bin/sh".to_owned()));
+                });
+            });
+        });
+
+        let fs = FakeFs::new(cx.executor());
+        let project = Project::test(fs, [], cx).await;
+        let window_handle =
+            cx.add_window(|window, cx| MultiWorkspace::test_new(project, window, cx));
+
+        let (workspace, terminal_panel) = window_handle
+            .update(cx, |multi_workspace, window, cx| {
+                let workspace = multi_workspace.workspace().clone();
+                let terminal_panel = workspace.update(cx, |workspace, cx| {
+                    let terminal_panel = cx.new(|cx| TerminalPanel::new(workspace, window, cx));
+                    workspace.add_panel(terminal_panel.clone(), window, cx);
+                    terminal_panel
+                });
+                (workspace, terminal_panel)
+            })
+            .unwrap();
+
+        let task = window_handle
+            .update(cx, |_, window, cx| {
+                workspace.update(cx, |workspace, cx| {
+                    TerminalView::deploy_task(
+                        workspace,
+                        &workspace::NewCenterTerminal { local: true },
+                        window,
+                        cx,
+                    )
+                })
+            })
+            .unwrap();
+
+        task.await.unwrap();
+
+        workspace.read_with(cx, |workspace, cx| {
+            assert_eq!(workspace.active_pane().read(cx).items_len(), 1);
+            assert!(
+                workspace
+                    .active_pane()
+                    .read(cx)
+                    .items()
+                    .any(|item| item.downcast::<TerminalView>().is_some())
+            );
+        });
+        terminal_panel.read_with(cx, |terminal_panel, cx| {
+            assert_eq!(terminal_panel.active_pane.read(cx).items_len(), 0);
+        });
     }
 
     #[cfg(unix)]

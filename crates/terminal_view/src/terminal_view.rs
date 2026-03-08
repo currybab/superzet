@@ -203,13 +203,12 @@ impl Focusable for TerminalView {
 }
 
 impl TerminalView {
-    ///Create a new Terminal in the current working directory or the user's home directory
-    pub fn deploy(
+    pub(crate) fn deploy_task(
         workspace: &mut Workspace,
         action: &NewCenterTerminal,
         window: &mut Window,
         cx: &mut Context<Workspace>,
-    ) {
+    ) -> Task<anyhow::Result<WeakEntity<Terminal>>> {
         let local = action.local;
         let working_directory = default_working_directory(workspace, cx);
         TerminalPanel::add_center_terminal(workspace, window, cx, move |project, cx| {
@@ -219,7 +218,16 @@ impl TerminalView {
                 project.create_terminal_shell(working_directory, cx)
             }
         })
-        .detach_and_log_err(cx);
+    }
+
+    ///Create a new Terminal in the current working directory or the user's home directory
+    pub fn deploy(
+        workspace: &mut Workspace,
+        action: &NewCenterTerminal,
+        window: &mut Window,
+        cx: &mut Context<Workspace>,
+    ) {
+        Self::deploy_task(workspace, action, window, cx).detach_and_log_err(cx);
     }
 
     pub fn new(

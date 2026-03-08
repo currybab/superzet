@@ -20,7 +20,7 @@ leaving the editor.
 
 ## Quick start
 
-**Open a terminal**: Press `` Ctrl+` `` to toggle the terminal panel, or `Ctrl+~` to open a new terminal.
+**Open a terminal**: Press `` Ctrl+` `` to toggle the terminal panel, or `Cmd+T` to open one in the center pane.
 
 **Run a command**: Press `Cmd+Shift+R` (macOS) or `Ctrl+Shift+R` (Linux/Windows) to open the task picker, then type any shell command.
 

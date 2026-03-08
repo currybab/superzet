@@ -84,7 +84,7 @@ pub fn spawn_for_workspace(
     session: &AgentSession,
     preset: &AgentPreset,
 ) -> Result<SpawnInTerminal> {
-    let label = format!("{} · {}", workspace.name, preset.label);
+    let (label, full_label) = terminal_tab_labels(workspace, preset);
     let command_label = if preset.args.is_empty() {
         preset.command.clone()
     } else {
@@ -93,10 +93,7 @@ pub fn spawn_for_workspace(
 
     let mut environment = preset.env.clone().into_iter().collect::<HashMap<_, _>>();
     inject_terminal_environment(&mut environment)?;
-    environment.insert(
-        AGENT_WORKSPACE_ID_ENV_VAR.to_string(),
-        workspace.id.clone(),
-    );
+    environment.insert(AGENT_WORKSPACE_ID_ENV_VAR.to_string(), workspace.id.clone());
 
     let managed_command = ManagedCommand::for_command(&preset.command);
     let (command, args) = if let Some(managed_command) = managed_command {
@@ -104,14 +101,17 @@ pub fn spawn_for_workspace(
             managed_command.real_binary_env_var().to_string(),
             preset.command.clone(),
         );
-        (managed_command.binary_name().to_string(), preset.args.clone())
+        (
+            managed_command.binary_name().to_string(),
+            preset.args.clone(),
+        )
     } else {
         (preset.command.clone(), preset.args.clone())
     };
 
     Ok(SpawnInTerminal {
         id: TaskId(format!("superzet:{}:{}", workspace.id, session.id)),
-        full_label: label.clone(),
+        full_label,
         label,
         command: Some(command),
         args,
@@ -128,6 +128,13 @@ pub fn spawn_for_workspace(
         show_command: true,
         show_rerun: true,
     })
+}
+
+fn terminal_tab_labels(workspace: &WorkspaceEntry, preset: &AgentPreset) -> (String, String) {
+    (
+        preset.label.clone(),
+        format!("{} · {}", workspace.name, preset.label),
+    )
 }
 
 fn runtime() -> Result<&'static AgentHookRuntime> {
@@ -172,8 +179,8 @@ impl AgentHookRuntime {
             codex_wrapper_content(&bin_dir, &notify_script_path),
         )?;
 
-        let server =
-            Server::http("127.0.0.1:0").map_err(|error| anyhow!(error).context("bind hook port"))?;
+        let server = Server::http("127.0.0.1:0")
+            .map_err(|error| anyhow!(error).context("bind hook port"))?;
         let hook_url = format!(
             "http://127.0.0.1:{}{}",
             server.server_addr().port(),
@@ -205,7 +212,8 @@ fn spawn_hook_server(
                 let response = match parse_request(request.url()) {
                     Ok(Some(event)) => {
                         if let Ok(mut subscribers) = subscribers.lock() {
-                            subscribers.retain(|sender| sender.send_blocking(event.clone()).is_ok());
+                            subscribers
+                                .retain(|sender| sender.send_blocking(event.clone()).is_ok());
                         }
                         Response::empty(204)
                     }
@@ -225,8 +233,8 @@ fn spawn_hook_server(
 }
 
 fn parse_request(url: &str) -> Result<Option<AgentHookEvent>> {
-    let url = Url::parse(&format!("http://127.0.0.1{url}"))
-        .context("failed to parse agent hook url")?;
+    let url =
+        Url::parse(&format!("http://127.0.0.1{url}")).context("failed to parse agent hook url")?;
     if url.path() != HOOK_ENDPOINT_PATH {
         return Ok(None);
     }
@@ -242,11 +250,7 @@ fn parse_request(url: &str) -> Result<Option<AgentHookEvent>> {
         return Ok(None);
     }
 
-    let Some(event_type) = params
-        .event_type
-        .as_deref()
-        .and_then(map_hook_event_type)
-    else {
+    let Some(event_type) = params.event_type.as_deref().and_then(map_hook_event_type) else {
         return Ok(None);
     };
 
@@ -258,8 +262,12 @@ fn parse_request(url: &str) -> Result<Option<AgentHookEvent>> {
     Ok(Some(AgentHookEvent {
         event_type,
         terminal_id,
-        workspace_id: params.workspace_id.filter(|workspace_id| !workspace_id.trim().is_empty()),
-        session_id: params.session_id.filter(|session_id| !session_id.trim().is_empty()),
+        workspace_id: params
+            .workspace_id
+            .filter(|workspace_id| !workspace_id.trim().is_empty()),
+        session_id: params
+            .session_id
+            .filter(|session_id| !session_id.trim().is_empty()),
         cwd: params.cwd.map(PathBuf::from),
     }))
 }
@@ -298,7 +306,10 @@ enum ManagedCommand {
 
 impl ManagedCommand {
     fn for_command(command: &str) -> Option<Self> {
-        let file_name = Path::new(command).file_name()?.to_str()?.to_ascii_lowercase();
+        let file_name = Path::new(command)
+            .file_name()?
+            .to_str()?
+            .to_ascii_lowercase();
         match file_name.as_str() {
             "claude" | "claude.exe" => Some(Self::Claude),
             "codex" | "codex.exe" => Some(Self::Codex),
@@ -456,11 +467,7 @@ fi
 
 exec "$REAL_BIN" --settings {claude_settings_path} "$@"
 "#,
-        resolver = wrapper_resolver_content(
-            "claude",
-            AGENT_REAL_CLAUDE_BIN_ENV_VAR,
-            bin_dir
-        ),
+        resolver = wrapper_resolver_content("claude", AGENT_REAL_CLAUDE_BIN_ENV_VAR, bin_dir),
     )
 }
 
@@ -562,10 +569,14 @@ exit "$SUPERZET_CODEX_STATUS"
 #[cfg(test)]
 mod tests {
     use super::*;
+    use superzet_model::{WorkspaceAttentionStatus, WorkspaceKind};
 
     #[test]
     fn maps_supported_event_types() {
-        assert_eq!(map_hook_event_type("Start"), Some(AgentHookEventType::Start));
+        assert_eq!(
+            map_hook_event_type("Start"),
+            Some(AgentHookEventType::Start)
+        );
         assert_eq!(
             map_hook_event_type("UserPromptSubmit"),
             Some(AgentHookEventType::Start)
@@ -597,21 +608,57 @@ mod tests {
 
     #[test]
     fn ignores_version_mismatches() {
-        let event = parse_request(
-            "/agent-hook?event_type=Stop&terminal_id=terminal-1&version=999",
-        )
-        .expect("request should parse");
+        let event = parse_request("/agent-hook?event_type=Stop&terminal_id=terminal-1&version=999")
+            .expect("request should parse");
 
         assert_eq!(event, None);
     }
 
     #[test]
     fn wrapper_prefers_override_binary_paths() {
-        let wrapper = claude_wrapper_content(Path::new("/tmp/bin"), Path::new("/tmp/hooks/claude-settings.json"));
+        let wrapper = claude_wrapper_content(
+            Path::new("/tmp/bin"),
+            Path::new("/tmp/hooks/claude-settings.json"),
+        );
         assert!(wrapper.contains(AGENT_REAL_CLAUDE_BIN_ENV_VAR));
 
-        let wrapper = codex_wrapper_content(Path::new("/tmp/bin"), Path::new("/tmp/hooks/notify.sh"));
+        let wrapper =
+            codex_wrapper_content(Path::new("/tmp/bin"), Path::new("/tmp/hooks/notify.sh"));
         assert!(wrapper.contains(AGENT_REAL_CODEX_BIN_ENV_VAR));
         assert!(wrapper.contains("notify=[\\\"bash\\\",\\\"/tmp/hooks/notify.sh\\\"]"));
+    }
+
+    #[test]
+    fn terminal_tab_uses_preset_label_and_keeps_workspace_in_full_label() {
+        let workspace = WorkspaceEntry {
+            id: "workspace-1".to_string(),
+            project_id: "project-1".to_string(),
+            kind: WorkspaceKind::Worktree,
+            name: "feature-branch".to_string(),
+            display_name: None,
+            branch: "feature-branch".to_string(),
+            worktree_path: PathBuf::from("/tmp/feature-branch"),
+            agent_preset_id: "codex".to_string(),
+            managed: true,
+            git_summary: None,
+            attention_status: WorkspaceAttentionStatus::Idle,
+            review_pending: false,
+            last_attention_reason: None,
+            created_at: Default::default(),
+            last_opened_at: Default::default(),
+        };
+        let preset = AgentPreset {
+            id: "codex".to_string(),
+            label: "Codex".to_string(),
+            command: "codex".to_string(),
+            args: Vec::new(),
+            env: Default::default(),
+            attention_patterns: Vec::new(),
+        };
+
+        let (label, full_label) = terminal_tab_labels(&workspace, &preset);
+
+        assert_eq!(label, "Codex");
+        assert_eq!(full_label, "feature-branch · Codex");
     }
 }

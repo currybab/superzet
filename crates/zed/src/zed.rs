@@ -2273,8 +2273,8 @@ mod tests {
         DisplayPoint, Editor, MultiBufferOffset, SelectionEffects, display_map::DisplayRow,
     };
     use gpui::{
-        Action, AnyWindowHandle, App, AssetSource, BorrowAppContext, TestAppContext, UpdateGlobal,
-        VisualTestContext, WindowHandle, actions,
+        Action, AnyWindowHandle, App, AssetSource, BorrowAppContext, Keystroke, TestAppContext,
+        UpdateGlobal, VisualTestContext, WindowHandle, actions,
     };
     use language::LanguageRegistry;
     use languages::{markdown_lang, rust_lang};
@@ -4613,6 +4613,45 @@ mod tests {
         );
     }
 
+    #[cfg(target_os = "macos")]
+    #[gpui::test]
+    async fn test_default_macos_terminal_and_symbol_shortcuts(cx: &mut gpui::TestAppContext) {
+        let app_state = init_keymap_test(cx);
+        let project = Project::test(app_state.fs.clone(), [], cx).await;
+        let window =
+            cx.add_window(|window, cx| MultiWorkspace::test_new(project.clone(), window, cx));
+        let workspace = window
+            .read_with(cx, |mw, _| mw.workspace().clone())
+            .unwrap();
+
+        window
+            .update(cx, |_, _, cx| {
+                workspace.update(cx, |workspace, cx| {
+                    workspace.register_action(|_, _: &workspace::NewTerminal, _window, _cx| {});
+                    workspace
+                        .register_action(|_, _: &workspace::NewCenterTerminal, _window, _cx| {});
+                    workspace
+                        .register_action(|_, _: &workspace::ToggleProjectSymbols, _window, _cx| {});
+                    workspace.register_action(
+                        |_, _: &terminal_view::terminal_panel::Toggle, _window, _cx| {},
+                    );
+                    cx.notify();
+                });
+            })
+            .unwrap();
+
+        assert_exact_key_bindings_for(
+            window.into(),
+            cx,
+            vec![
+                ("ctrl-`", &terminal_view::terminal_panel::Toggle),
+                ("cmd-t", &workspace::NewCenterTerminal::default()),
+                ("ctrl-shift-t", &workspace::ToggleProjectSymbols),
+            ],
+            line!(),
+        );
+    }
+
     #[gpui::test]
     async fn test_disabled_keymap_binding(cx: &mut gpui::TestAppContext) {
         let executor = cx.executor();
@@ -5086,6 +5125,32 @@ mod tests {
                 line,
                 action.name(),
                 key
+            );
+        }
+    }
+
+    fn assert_exact_key_bindings_for(
+        window: AnyWindowHandle,
+        cx: &TestAppContext,
+        actions: Vec<(&'static str, &dyn Action)>,
+        line: u32,
+    ) {
+        for (binding_source, action) in actions {
+            let expected = Keystroke::parse(binding_source).unwrap();
+            let bindings = cx
+                .update(|cx| window.update(cx, |_, window, _| window.bindings_for_action(action)))
+                .unwrap();
+
+            assert!(
+                bindings.iter().any(|binding| {
+                    binding.keystrokes().len() == 1
+                        && binding.keystrokes()[0].inner().key == expected.key
+                        && binding.keystrokes()[0].inner().modifiers == expected.modifiers
+                }),
+                "On {} Failed to find {} with key binding {}",
+                line,
+                action.name(),
+                binding_source
             );
         }
     }

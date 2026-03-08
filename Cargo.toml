@@ -860,6 +860,7 @@ livekit = { git = "https://github.com/zed-industries/livekit-rust-sdks", rev = "
 libwebrtc = { git = "https://github.com/zed-industries/livekit-rust-sdks", rev = "37835f840d0070d45ac8b31cce6a6ae7aca3f459" }
 
 [profile.dev]
+debug = 1
 split-debuginfo = "unpacked"
 incremental = true
 codegen-units = 16
@@ -869,7 +870,7 @@ codegen-units = 16
 [profile.dev.build-override]
 codegen-units = 16
 split-debuginfo = "unpacked"
-debug = true
+debug = 0
 
 [profile.dev.package]
 # proc-macros start
@@ -922,6 +923,10 @@ theme_selector = { codegen-units = 1 }
 time_format = { codegen-units = 1 }
 ui_input = { codegen-units = 1 }
 zed_actions = { codegen-units = 1 }
+
+# Keep workspace crates debuggable while stripping external dependency debug info.
+[profile.dev.package."*"]
+debug = 0
 
 [profile.release]
 debug = "limited"

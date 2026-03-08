@@ -31,13 +31,11 @@ pub struct WorkspaceRefresh {
 
 #[derive(Clone, Debug, Default)]
 pub struct CreateWorkspaceOptions {
-    pub run_setup: bool,
+    pub branch_name: String,
 }
 
 #[derive(Default, Deserialize)]
 struct SuperzetConfig {
-    #[serde(default)]
-    setup: Vec<String>,
     #[serde(default)]
     teardown: Vec<String>,
     #[serde(default)]
@@ -98,14 +96,18 @@ pub fn create_workspace(
         .and_then(|name| name.to_str())
         .unwrap_or("project");
     let base_ref = current_branch(&repo_root).unwrap_or_else(|| "HEAD".to_string());
+    let branch_name = options.branch_name.trim();
+    if branch_name.is_empty() {
+        bail!("branch name is required");
+    }
+    let branch_name = branch_name.to_string();
 
     let parent = repo_root.parent().unwrap_or(repo_root.as_path());
     let worktree_root = parent.join(".superzet-worktrees").join(repo_name);
     fs::create_dir_all(&worktree_root)?;
 
-    let workspace_name = unique_workspace_name(&worktree_root);
-    let worktree_path = worktree_root.join(&workspace_name);
-    let branch_name = format!("superzet/{}", slugify(&workspace_name));
+    let worktree_directory_name = unique_worktree_directory_name(&worktree_root, &branch_name);
+    let worktree_path = worktree_root.join(&worktree_directory_name);
 
     run_git(
         &repo_root,
@@ -119,14 +121,13 @@ pub fn create_workspace(
         ],
     )?;
 
-    let warning =
-        match prepare_workspace_contents(&repo_root, &worktree_path, &workspace_name, &options) {
-            Ok(warnings) => (!warnings.is_empty()).then(|| warnings.join("\n")),
-            Err(error) => {
-                cleanup_worktree(&repo_root, &worktree_path);
-                return Err(error);
-            }
-        };
+    let warning = match prepare_workspace_contents(&repo_root, &worktree_path) {
+        Ok(warnings) => (!warnings.is_empty()).then(|| warnings.join("\n")),
+        Err(error) => {
+            cleanup_worktree(&repo_root, &worktree_path);
+            return Err(error);
+        }
+    };
 
     let refresh = refresh_workspace_path(&worktree_path).unwrap_or(WorkspaceRefresh {
         branch: branch_name.clone(),
@@ -138,7 +139,7 @@ pub fn create_workspace(
             id: Uuid::new_v4().to_string(),
             project_id: project.id.clone(),
             kind: WorkspaceKind::Worktree,
-            name: workspace_name,
+            name: branch_name.clone(),
             display_name: None,
             branch: refresh.branch,
             worktree_path,
@@ -266,7 +267,6 @@ fn git_output(repo_root: &Path, args: &[&str]) -> Result<String> {
 
 #[derive(Copy, Clone)]
 enum HookPhase {
-    Setup,
     Teardown,
 }
 
@@ -278,7 +278,6 @@ fn run_repo_hooks(
 ) -> Result<()> {
     let config = load_superzet_config(repo_root)?;
     let commands = match phase {
-        HookPhase::Setup => config.setup,
         HookPhase::Teardown => config.teardown,
     };
 
@@ -289,12 +288,7 @@ fn run_repo_hooks(
     Ok(())
 }
 
-fn prepare_workspace_contents(
-    repo_root: &Path,
-    worktree_path: &Path,
-    workspace_name: &str,
-    options: &CreateWorkspaceOptions,
-) -> Result<Vec<String>> {
+fn prepare_workspace_contents(repo_root: &Path, worktree_path: &Path) -> Result<Vec<String>> {
     let config = load_superzet_config(repo_root)?;
     let mut warnings = Vec::new();
 
@@ -313,14 +307,6 @@ fn prepare_workspace_contents(
         let destination_path = worktree_path.join(copy_entry);
         copy_repo_path(&source_path, &destination_path)
             .with_context(|| format!("failed to copy {}", source_path.display()))?;
-    }
-
-    if options.run_setup {
-        if let Err(error) =
-            run_repo_hooks(repo_root, worktree_path, workspace_name, HookPhase::Setup)
-        {
-            warnings.push(format!("{error:#}"));
-        }
     }
 
     Ok(warnings)
@@ -453,8 +439,8 @@ fn run_shell_command(
     Ok(())
 }
 
-fn unique_workspace_name(worktree_root: &Path) -> String {
-    let base = format!("workspace-{}", Utc::now().format("%Y%m%d-%H%M%S"));
+fn unique_worktree_directory_name(worktree_root: &Path, branch_name: &str) -> String {
+    let base = slugify(branch_name);
     if !worktree_root.join(&base).exists() {
         return base;
     }
@@ -519,7 +505,9 @@ mod tests {
         let error = create_workspace(
             &registration.project,
             "codex",
-            CreateWorkspaceOptions { run_setup: true },
+            CreateWorkspaceOptions {
+                branch_name: "feature/dirty-worktree".to_string(),
+            },
         )
         .unwrap_err();
 
@@ -551,7 +539,9 @@ mod tests {
         let outcome = create_workspace(
             &registration.project,
             "codex",
-            CreateWorkspaceOptions { run_setup: true },
+            CreateWorkspaceOptions {
+                branch_name: "feature/linked-root".to_string(),
+            },
         )
         .unwrap();
         let expected_root = repo
@@ -563,6 +553,33 @@ mod tests {
 
         assert_eq!(registration.project.repo_root, repo.repo_path);
         assert!(outcome.workspace.worktree_path.starts_with(expected_root));
+
+        delete_workspace(&outcome.workspace, &registration.project.repo_root, true).unwrap();
+    }
+
+    #[test]
+    fn create_workspace_uses_requested_branch_name_and_sanitized_worktree_path() {
+        let repo = init_repo();
+        let registration = register_project(&repo.repo_path, "codex").unwrap();
+        let outcome = create_workspace(
+            &registration.project,
+            "codex",
+            CreateWorkspaceOptions {
+                branch_name: "feature/superzet-test".to_string(),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(outcome.workspace.name, "feature/superzet-test");
+        assert_eq!(outcome.workspace.branch, "feature/superzet-test");
+        assert_eq!(
+            outcome
+                .workspace
+                .worktree_path
+                .file_name()
+                .and_then(|name| name.to_str()),
+            Some("feature-superzet-test")
+        );
 
         delete_workspace(&outcome.workspace, &registration.project.repo_root, true).unwrap();
     }
@@ -587,12 +604,15 @@ mod tests {
             "preset\n",
         )
         .unwrap();
+        commit_all_changes(&repo.repo_path, "add superzet files");
 
         let registration = register_project(&repo.repo_path, "codex").unwrap();
         let outcome = create_workspace(
             &registration.project,
             "codex",
-            CreateWorkspaceOptions { run_setup: false },
+            CreateWorkspaceOptions {
+                branch_name: "feature/copy-paths".to_string(),
+            },
         )
         .unwrap();
 
@@ -625,12 +645,15 @@ mod tests {
             r#"{"copy":["../outside"]}"#,
         )
         .unwrap();
+        commit_all_changes(&repo.repo_path, "add invalid copy config");
 
         let registration = register_project(&repo.repo_path, "codex").unwrap();
         let error = create_workspace(
             &registration.project,
             "codex",
-            CreateWorkspaceOptions { run_setup: true },
+            CreateWorkspaceOptions {
+                branch_name: "feature/reject-copy".to_string(),
+            },
         )
         .unwrap_err();
 
@@ -650,12 +673,15 @@ mod tests {
             r#"{"copy":["missing-directory"]}"#,
         )
         .unwrap();
+        commit_all_changes(&repo.repo_path, "add missing copy config");
 
         let registration = register_project(&repo.repo_path, "codex").unwrap();
         let outcome = create_workspace(
             &registration.project,
             "codex",
-            CreateWorkspaceOptions { run_setup: true },
+            CreateWorkspaceOptions {
+                branch_name: "feature/missing-copy-warning".to_string(),
+            },
         )
         .unwrap();
 
@@ -707,5 +733,10 @@ mod tests {
                 String::from_utf8_lossy(&output.stderr)
             );
         }
+    }
+
+    fn commit_all_changes(repo_path: &Path, message: &str) {
+        git(repo_path, &["add", "."]);
+        git(repo_path, &["commit", "-m", message]);
     }
 }

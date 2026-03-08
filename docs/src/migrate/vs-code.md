@@ -207,11 +207,11 @@ Here’s a quick reference for where keybindings match and where they differ.
 | Find files                  | `Cmd + P`              |
 | Run a command               | `Cmd + Shift + P`      |
 | Search text (project-wide)  | `Cmd + Shift + F`      |
-| Find symbols (project-wide) | `Cmd + T`              |
+| Find symbols (project-wide) | `Ctrl + Shift + T`     |
 | Find symbols (file-wide)    | `Cmd + Shift + O`      |
 | Toggle left dock            | `Cmd + B`              |
 | Toggle bottom dock          | `Cmd + J`              |
-| Open terminal               | `Ctrl + ~`             |
+| Open terminal               | ``Ctrl + ` ``          |
 | Open file tree explorer     | `Cmd + Shift + E`      |
 | Close current buffer        | `Cmd + W`              |
 | Close whole project         | `Cmd + Shift + W`      |
