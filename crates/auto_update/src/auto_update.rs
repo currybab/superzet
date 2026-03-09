@@ -33,6 +33,16 @@ const SHOULD_SHOW_UPDATE_NOTIFICATION_KEY: &str = "auto-updater-should-show-upda
 const POLL_INTERVAL: Duration = Duration::from_secs(60 * 60);
 const REMOTE_SERVER_CACHE_LIMIT: usize = 5;
 
+fn update_explanation_from_compile_env() -> Option<&'static str> {
+    option_env!("SUPERZET_UPDATE_EXPLANATION").or(option_env!("ZED_UPDATE_EXPLANATION"))
+}
+
+fn update_explanation_from_env() -> Option<String> {
+    env::var("SUPERZET_UPDATE_EXPLANATION")
+        .ok()
+        .or_else(|| env::var("ZED_UPDATE_EXPLANATION").ok())
+}
+
 actions!(
     auto_update,
     [
@@ -186,8 +196,8 @@ pub fn init(client: Arc<Client>, cx: &mut App) {
             .map(|channel| channel.poll_for_updates())
             .unwrap_or(false);
 
-        if option_env!("ZED_UPDATE_EXPLANATION").is_none()
-            && env::var("ZED_UPDATE_EXPLANATION").is_err()
+        if update_explanation_from_compile_env().is_none()
+            && update_explanation_from_env().is_none()
             && poll_for_updates
         {
             let mut update_subscription = AutoUpdateSetting::get_global(cx)
@@ -212,7 +222,7 @@ pub fn init(client: Arc<Client>, cx: &mut App) {
 }
 
 pub fn check(_: &Check, window: &mut Window, cx: &mut App) {
-    if let Some(message) = option_env!("ZED_UPDATE_EXPLANATION") {
+    if let Some(message) = update_explanation_from_compile_env() {
         drop(window.prompt(
             gpui::PromptLevel::Info,
             "superzet was installed via a package manager.",
@@ -223,7 +233,7 @@ pub fn check(_: &Check, window: &mut Window, cx: &mut App) {
         return;
     }
 
-    if let Ok(message) = env::var("ZED_UPDATE_EXPLANATION") {
+    if let Some(message) = update_explanation_from_env() {
         drop(window.prompt(
             gpui::PromptLevel::Info,
             "superzet was installed via a package manager.",

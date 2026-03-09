@@ -15,7 +15,7 @@ use util::ResultExt;
 
 use super::QuickActionBar;
 
-const ZED_REPL_DOCUMENTATION: &str = "https://zed.dev/docs/repl";
+const ZED_REPL_DOCUMENTATION: &str = "https://superzet.dev/docs/repl";
 
 struct ReplMenuState {
     tooltip: SharedString,
@@ -373,7 +373,8 @@ impl QuickActionBar {
     }
 
     pub fn render_repl_setup(&self, language: &str, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let tooltip: SharedString = SharedString::from(format!("Setup Zed REPL for {}", language));
+        let tooltip: SharedString =
+            SharedString::from(format!("Setup superzet REPL for {}", language));
         Some(
             h_flex()
                 .gap(DynamicSpacing::Base06.rems(cx))

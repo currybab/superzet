@@ -4,9 +4,9 @@
   <img src="assets/branding/logo_default.png" alt="superzet" width="180" />
 </p>
 
-`superzet` is a native workspace shell for coding agents.
+`superzet` is a local-first workspace shell for coding agents.
 
-It is built on top of a Zed fork, but the product direction is different: a Superset-inspired shell for managing local repositories, git worktrees, terminals, diffs, and file navigation in one app.
+It is built on top of a Zed fork, but the product scope is narrower: one window, multiple local workspaces, fast file navigation, diff views, and terminal-heavy agent workflows.
 
 ## Status
 
@@ -14,21 +14,19 @@ This repository is in early alpha.
 
 Current focus:
 
-- single-user, local-first workflow
-- repository and worktree navigation in the left sidebar
-- native editor, terminal, split panes, and diff views from Zed
-- changes and file explorer surfaces in the right sidebar
-- terminal-first use of CLI agents such as Claude Code and Codex
+- local repositories and git worktrees
+- native editor, split panes, and diff views
+- terminal-first use of external coding agents
+- macOS public preview releases
 
-Not in scope right now:
+Deliberately out of scope for the default build:
 
-- team features
-- login or cloud collaboration
-- custom hosted agent surface inside the app
+- cloud collaboration
+- calls / WebRTC
+- hosted AI surfaces from upstream Zed
+- remote-server distribution as part of the public release flow
 
 ## Build From Source
-
-### macOS
 
 ```bash
 git clone git@github.com:nerdface-ai/superzet.git
@@ -36,52 +34,62 @@ cd superzet
 cargo run -p superzet
 ```
 
-The default app build is the lightweight local shell flavor. It excludes collab, call/WebRTC, ACP, Copilot, edit prediction, and the rest of the agent UI stack.
+The default app build is the lightweight single-user shell flavor:
 
 ```bash
 cargo build -p superzet
 ```
 
-If you need the full upstream-like surface again, opt in explicitly:
+If you need the upstream-like AI and collab stack again:
 
 ```bash
 cargo build -p superzet --features full
 ```
 
-If the build complains about the Metal toolchain, install it once:
+For a signed macOS bundle:
 
 ```bash
-xcodebuild -downloadComponent MetalToolchain
+./script/bundle-mac aarch64-apple-darwin
 ```
 
-### Release build
+## Public Preview Release
 
-```bash
-cargo build -p superzet --release
-```
+The public test release flow is macOS preview only.
 
-## Project Config
+- Tag preview releases as `vX.Y.Z-pre`
+- GitHub Actions builds `superzet-aarch64.dmg`
+- The workflow uploads the DMG and `sha256sums.txt` to GitHub Releases
+- `superzet.dev/releases/...` is served by a thin Cloudflare worker that points the app at those GitHub assets
 
-`superzet` reads optional per-project automation from `.superzet/config.json`.
+## Release Infrastructure
 
-```json
-{
-  "setup": ["./.superzet/setup.sh"],
-  "teardown": ["./.superzet/teardown.sh"]
-}
-```
+To publish preview builds with in-app updates, you need:
 
-## Notes
+- GitHub Releases enabled for this repository
+- Cloudflare configured for `superzet.dev`
+- the release worker deployed from `.cloudflare/release-assets`
+- optional but recommended: a Cloudflare worker secret named `GITHUB_RELEASES_TOKEN` to avoid GitHub API rate limits on update checks
+- Apple signing and notarization credentials in GitHub secrets:
+  - `MACOS_CERTIFICATE`
+  - `MACOS_CERTIFICATE_PASSWORD`
+  - `APPLE_NOTARIZATION_KEY`
+  - `APPLE_NOTARIZATION_KEY_ID`
+  - `APPLE_NOTARIZATION_ISSUER_ID`
+- the mac signing identity in the `MACOS_SIGNING_IDENTITY` repository variable
 
-- The app brand is `superzet`, but extension downloads continue to use the upstream Zed marketplace.
-- Much of the editor, terminal, settings infrastructure, and platform integration still come from upstream Zed code and are intentionally kept close for easier maintenance.
-- A lot of the upstream docs in `docs/` are still Zed-oriented and have not been fully reworked yet.
+The app prefers `SUPERZET_*` runtime env vars for release/update overrides, but legacy `ZED_*` aliases still work during the transition.
 
-## Development Docs
+## Open Source Notes
 
-- [macOS build notes](./docs/src/development/macos.md)
-- [Linux build notes](./docs/src/development/linux.md)
-- [Windows build notes](./docs/src/development/windows.md)
+- Extensions still use the upstream Zed marketplace.
+- Much of the editor and platform code still comes from upstream Zed and is intentionally kept close for easier maintenance.
+- Public docs and release surfaces are being rewritten around `superzet`, but not every inherited upstream page has been reworked yet.
+
+## Project Docs
+
+- [Contributing](./CONTRIBUTING.md)
+- [Security](./SECURITY.md)
+- [Docs](./docs/src/SUMMARY.md)
 
 ## License
 

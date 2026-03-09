@@ -55,29 +55,40 @@ pub use rpc::*;
 pub use telemetry_events::Event;
 pub use user::*;
 
+fn env_var(primary: &str, legacy: &str) -> Option<String> {
+    std::env::var(primary)
+        .ok()
+        .or_else(|| std::env::var(legacy).ok())
+}
+
+fn env_flag(primary: &str, legacy: &str) -> bool {
+    env_var(primary, legacy).is_some_and(|value| !value.is_empty())
+}
+
 static ZED_SERVER_URL: LazyLock<Option<String>> =
-    LazyLock::new(|| std::env::var("ZED_SERVER_URL").ok());
-static ZED_RPC_URL: LazyLock<Option<String>> = LazyLock::new(|| std::env::var("ZED_RPC_URL").ok());
+    LazyLock::new(|| env_var("SUPERZET_SERVER_URL", "ZED_SERVER_URL"));
+static ZED_RPC_URL: LazyLock<Option<String>> =
+    LazyLock::new(|| env_var("SUPERZET_RPC_URL", "ZED_RPC_URL"));
 
 pub static IMPERSONATE_LOGIN: LazyLock<Option<String>> = LazyLock::new(|| {
-    std::env::var("ZED_IMPERSONATE")
-        .ok()
+    env_var("SUPERZET_IMPERSONATE", "ZED_IMPERSONATE")
         .and_then(|s| if s.is_empty() { None } else { Some(s) })
 });
 
-pub static USE_WEB_LOGIN: LazyLock<bool> = LazyLock::new(|| std::env::var("ZED_WEB_LOGIN").is_ok());
+pub static USE_WEB_LOGIN: LazyLock<bool> =
+    LazyLock::new(|| env_flag("SUPERZET_WEB_LOGIN", "ZED_WEB_LOGIN"));
 
 pub static ADMIN_API_TOKEN: LazyLock<Option<String>> = LazyLock::new(|| {
-    std::env::var("ZED_ADMIN_API_TOKEN")
-        .ok()
+    env_var("SUPERZET_ADMIN_API_TOKEN", "ZED_ADMIN_API_TOKEN")
         .and_then(|s| if s.is_empty() { None } else { Some(s) })
 });
 
 pub static ZED_APP_PATH: LazyLock<Option<PathBuf>> =
-    LazyLock::new(|| std::env::var("ZED_APP_PATH").ok().map(PathBuf::from));
+    LazyLock::new(|| env_var("SUPERZET_APP_PATH", "ZED_APP_PATH").map(PathBuf::from));
 
-pub static ZED_ALWAYS_ACTIVE: LazyLock<bool> =
-    LazyLock::new(|| std::env::var("ZED_ALWAYS_ACTIVE").is_ok_and(|e| !e.is_empty()));
+pub static ZED_ALWAYS_ACTIVE: LazyLock<bool> = LazyLock::new(|| {
+    env_var("SUPERZET_ALWAYS_ACTIVE", "ZED_ALWAYS_ACTIVE").is_some_and(|e| !e.is_empty())
+});
 
 pub const INITIAL_RECONNECTION_DELAY: Duration = Duration::from_millis(500);
 pub const MAX_RECONNECTION_DELAY: Duration = Duration::from_secs(30);

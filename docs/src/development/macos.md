@@ -1,13 +1,12 @@
----
-title: Building Zed for macOS
-description: "Guide to building zed for macos for Zed development."
+title: Building superzet for macOS
+description: "Guide to building superzet for macOS development."
 ---
 
-# Building Zed for macOS
+# Building superzet for macOS
 
 ## Repository
 
-Clone the [Zed repository](https://github.com/zed-industries/zed).
+Clone the [superzet repository](https://github.com/nerdface-ai/superzet).
 
 ## Dependencies
 
@@ -36,31 +35,31 @@ Clone the [Zed repository](https://github.com/zed-industries/zed).
   brew install cmake
   ```
 
-## Building Zed from Source
+## Building superzet from Source
 
-Once you have the dependencies installed, you can build Zed using [Cargo](https://doc.rust-lang.org/cargo/).
+Once you have the dependencies installed, you can build `superzet` using [Cargo](https://doc.rust-lang.org/cargo/).
 
 For a debug build:
 
 ```sh
-cargo run
+cargo run -p superzet
 ```
 
 For a release build:
 
 ```sh
-cargo run --release
+cargo run -p superzet --release
 ```
 
 And to run the tests:
 
 ```sh
-cargo test --workspace
+cargo test -p superzet
 ```
 
 ## Visual Regression Tests
 
-Zed includes visual regression tests that capture screenshots of real Zed windows and compare them against baseline images. These tests require macOS with Screen Recording permission.
+The inherited visual regression tests capture screenshots of real app windows and compare them against baseline images. These tests require macOS with Screen Recording permission.
 
 ### Prerequisites
 
@@ -74,7 +73,7 @@ You must grant Screen Recording permission to your terminal:
 ### Running Visual Tests
 
 ```sh
-cargo run -p zed --bin zed_visual_test_runner --features visual-tests
+cargo run -p superzet --bin zed_visual_test_runner --features visual-tests
 ```
 
 ### Baseline Images

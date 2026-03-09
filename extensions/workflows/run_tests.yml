@@ -1,4 +1,4 @@
-# Generated from xtask::workflows::extensions::run_tests within the Zed repository.
+# Generated from xtask::workflows::extensions::run_tests within the superzet repository.
 # Rebuild with `cargo xtask workflows`.
 name: extensions::run_tests
 on:

@@ -1,4 +1,4 @@
-# Generated from xtask::workflows::extensions::bump_version within the Zed repository.
+# Generated from xtask::workflows::extensions::bump_version within the superzet repository.
 # Rebuild with `cargo xtask workflows`.
 name: extensions::bump_version
 on:
@@ -13,7 +13,7 @@ on:
   workflow_dispatch: {}
 jobs:
   determine_bump_type:
-    if: (github.repository_owner == 'zed-industries' || github.repository_owner == 'zed-extensions')
+    if: github.repository_owner == 'nerdface-ai'
     runs-on: namespace-profile-2x4-ubuntu-2404
     permissions: {}
     steps:

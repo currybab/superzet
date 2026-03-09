@@ -1,4 +1,4 @@
-//! Provides constructs for the Zed app version and release channel.
+//! Provides constructs for the superzet app version and release channel.
 
 #![deny(missing_docs)]
 
@@ -7,13 +7,23 @@ use std::{env, str::FromStr, sync::LazyLock};
 use gpui::{App, Global};
 use semver::Version;
 
+fn env_var(primary: &str, legacy: &str) -> Option<String> {
+    env::var(primary).ok().or_else(|| env::var(legacy).ok())
+}
+
+fn env_flag(primary: &str, legacy: &str, predicate: impl Fn(&str) -> bool) -> bool {
+    env_var(primary, legacy)
+        .as_deref()
+        .is_some_and(predicate)
+}
+
 /// stable | dev | nightly | preview
 pub static RELEASE_CHANNEL_NAME: LazyLock<String> = LazyLock::new(|| {
     resolved_release_channel_name(
-        env::var("ZED_RELEASE_CHANNEL").ok(),
+        env_var("SUPERZET_RELEASE_CHANNEL", "ZED_RELEASE_CHANNEL"),
         include_str!("../../zed/RELEASE_CHANNEL").trim(),
         cfg!(debug_assertions),
-        env::var("ZED_TERM").is_ok_and(|value| value == "true"),
+        env_flag("SUPERZET_TERM", "ZED_TERM", |value| value == "true"),
     )
 });
 
@@ -35,7 +45,7 @@ pub fn app_identifier() -> &'static str {
     }
 }
 
-/// The Git commit SHA that Zed was built at.
+/// The Git commit SHA that superzet was built at.
 #[derive(Clone, Eq, Debug, PartialEq)]
 pub struct AppCommitSha(String);
 
@@ -75,7 +85,7 @@ struct GlobalAppVersion(Version);
 
 impl Global for GlobalAppVersion {}
 
-/// The version of Zed.
+/// The version of superzet.
 pub struct AppVersion;
 
 impl AppVersion {
@@ -85,8 +95,11 @@ impl AppVersion {
         build_id: Option<&str>,
         commit_sha: Option<AppCommitSha>,
     ) -> Version {
-        let mut version: Version = if let Ok(from_env) = env::var("ZED_APP_VERSION") {
-            from_env.parse().expect("invalid ZED_APP_VERSION")
+        let mut version: Version =
+            if let Some(from_env) = env_var("SUPERZET_APP_VERSION", "ZED_APP_VERSION") {
+            from_env
+                .parse()
+                .expect("invalid SUPERZET_APP_VERSION or ZED_APP_VERSION")
         } else {
             pkg_version.parse().expect("invalid version in Cargo.toml")
         };

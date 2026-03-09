@@ -7,19 +7,19 @@ use zed_actions::feedback::{EmailZed, FileBugReport, RequestFeature};
 actions!(
     zed,
     [
-        /// Opens the Zed repository on GitHub.
+        /// Opens the superzet repository on GitHub.
         OpenZedRepo,
     ]
 );
 
-const ZED_REPO_URL: &str = "https://github.com/zed-industries/zed";
+const SUPERZET_REPO_URL: &str = "https://github.com/nerdface-ai/superzet";
 
-const REQUEST_FEATURE_URL: &str = "https://github.com/zed-industries/zed/discussions/new/choose";
+const REQUEST_FEATURE_URL: &str = "https://github.com/nerdface-ai/superzet/discussions/new/choose";
 
 fn file_bug_report_url(specs: &SystemSpecs) -> String {
     format!(
         concat!(
-            "https://github.com/zed-industries/zed/issues/new",
+            "https://github.com/nerdface-ai/superzet/issues/new",
             "?",
             "template=10_bug_report.yml",
             "&",
@@ -29,16 +29,8 @@ fn file_bug_report_url(specs: &SystemSpecs) -> String {
     )
 }
 
-fn email_zed_url(specs: &SystemSpecs) -> String {
-    format!(
-        concat!("mailto:hi@zed.dev", "?", "body={}"),
-        email_body(specs)
-    )
-}
-
-fn email_body(specs: &SystemSpecs) -> String {
-    let body = format!("\n\nSystem Information:\n\n{}", specs);
-    urlencoding::encode(&body).to_string()
+fn support_url(_: &SystemSpecs) -> String {
+    REQUEST_FEATURE_URL.to_string()
 }
 
 pub fn init(cx: &mut App) {
@@ -84,14 +76,14 @@ pub fn init(cx: &mut App) {
                 cx.spawn_in(window, async move |_, cx| {
                     let specs = specs.await;
                     cx.update(|_, cx| {
-                        cx.open_url(&email_zed_url(&specs));
+                        cx.open_url(&support_url(&specs));
                     })
                     .log_err();
                 })
                 .detach();
             })
             .register_action(move |_, _: &OpenZedRepo, _, cx| {
-                cx.open_url(ZED_REPO_URL);
+                cx.open_url(SUPERZET_REPO_URL);
             });
     })
     .detach();

@@ -60,7 +60,7 @@ actions!(
         OpenServerSettings,
         /// Quits the application.
         Quit,
-        /// Shows information about Zed.
+        /// Shows information about superzet.
         About,
         /// Opens the documentation website.
         OpenDocs,
@@ -315,7 +315,7 @@ pub mod feedback {
     actions!(
         feedback,
         [
-            /// Opens email client to send feedback to Zed support.
+            /// Opens the superzet support entry point.
             EmailZed,
             /// Opens the bug report form.
             FileBugReport,
@@ -627,7 +627,7 @@ pub mod outline {
 actions!(
     zed_predict_onboarding,
     [
-        /// Opens the Zed Predict onboarding modal.
+        /// Opens the predictive editing onboarding modal.
         OpenZedPredictOnboarding
     ]
 );

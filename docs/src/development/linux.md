@@ -1,13 +1,12 @@
----
-title: Building Zed for Linux
-description: "Guide to building zed for linux for Zed development."
+title: Building superzet for Linux
+description: "Guide to building superzet for Linux development."
 ---
 
-# Building Zed for Linux
+# Building superzet for Linux
 
 ## Repository
 
-Clone the [Zed repository](https://github.com/zed-industries/zed).
+Clone the [superzet repository](https://github.com/nerdface-ai/superzet).
 
 ## Dependencies
 
@@ -25,7 +24,7 @@ Clone the [Zed repository](https://github.com/zed-industries/zed).
 
 On Linux, Rust's default linker is [LLVM's `lld`](https://blog.rust-lang.org/2025/09/18/Rust-1.90.0/). Alternative linkers, especially [Wild](https://github.com/davidlattimore/wild) and [Mold](https://github.com/rui314/mold), can improve clean and incremental build times.
 
-Zed currently uses Mold in CI because it is more mature. For local development, Wild is recommended because it is typically 5-20% faster than Mold.
+The inherited Linux CI still uses Mold because it is more mature. For local development, Wild is recommended because it is typically 5-20% faster than Mold.
 
 These linkers can be installed with `script/install-mold` and `script/install-wild`.
 
@@ -50,12 +49,12 @@ rustflags = ["-C", "link-arg=-fuse-ld=mold"]
 
 ## Building from source
 
-Once the dependencies are installed, you can build Zed using [Cargo](https://doc.rust-lang.org/cargo/).
+Once the dependencies are installed, you can build `superzet` using [Cargo](https://doc.rust-lang.org/cargo/).
 
 For a debug build of the editor:
 
 ```sh
-cargo run
+cargo run -p superzet
 ```
 
 And to run the tests:

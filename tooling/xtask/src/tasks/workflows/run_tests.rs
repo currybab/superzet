@@ -462,10 +462,6 @@ pub(crate) fn run_platform_tests(platform: Platform) -> NamedJob {
     run_platform_tests_impl(platform, true)
 }
 
-pub(crate) fn run_platform_tests_no_filter(platform: Platform) -> NamedJob {
-    run_platform_tests_impl(platform, false)
-}
-
 fn run_platform_tests_impl(platform: Platform, filter_packages: bool) -> NamedJob {
     let runner = match platform {
         Platform::Windows => runners::WINDOWS_DEFAULT,

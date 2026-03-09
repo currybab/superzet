@@ -1,15 +1,14 @@
----
-title: Building Zed for Windows
-description: "Guide to building zed for windows for Zed development."
+title: Building superzet for Windows
+description: "Guide to building superzet for Windows development."
 ---
 
-# Building Zed for Windows
+# Building superzet for Windows
 
 > The following commands may be executed in any shell.
 
 ## Repository
 
-Clone the [Zed repository](https://github.com/zed-industries/zed).
+Clone the [superzet repository](https://github.com/nerdface-ai/superzet).
 
 ## Dependencies
 
@@ -21,7 +20,7 @@ Clone the [Zed repository](https://github.com/zed-industries/zed).
 - Install the Windows 11 or 10 SDK for your system, and make sure at least `Windows 10 SDK version 2104 (10.0.20348.0)` is installed. You can download it from the [Windows SDK Archive](https://developer.microsoft.com/windows/downloads/windows-sdk/).
 - Install [CMake](https://cmake.org/download) (required by [a dependency](https://docs.rs/wasmtime-c-api-impl/latest/wasmtime_c_api/)). Or you can install it through Visual Studio Installer, then manually add the `bin` directory to your `PATH`, for example: `C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin`.
 
-If you cannot compile Zed, make sure a Visual Studio installation includes at least the following components:
+If you cannot compile `superzet`, make sure a Visual Studio installation includes at least the following components:
 
 ```json
 {

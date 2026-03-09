@@ -9,9 +9,29 @@ open_result=false
 local_install=false
 can_code_sign=false
 
-# This must match the team in the provisioning profile.
-IDENTITY="Zed Industries, Inc."
-APPLE_NOTARIZATION_TEAM="MQ55VZLNZQ"
+resolve_env() {
+    local primary=$1
+    local legacy=$2
+    local value="${!primary:-}"
+    if [[ -z "${value}" ]]; then
+        value="${!legacy:-}"
+    fi
+    printf '%s' "${value}"
+}
+
+macos_certificate="$(resolve_env SUPERZET_MACOS_CERTIFICATE MACOS_CERTIFICATE)"
+macos_certificate_password="$(resolve_env SUPERZET_MACOS_CERTIFICATE_PASSWORD MACOS_CERTIFICATE_PASSWORD)"
+apple_notarization_key="$(resolve_env SUPERZET_APPLE_NOTARIZATION_KEY APPLE_NOTARIZATION_KEY)"
+apple_notarization_key_id="$(resolve_env SUPERZET_APPLE_NOTARIZATION_KEY_ID APPLE_NOTARIZATION_KEY_ID)"
+apple_notarization_issuer_id="$(resolve_env SUPERZET_APPLE_NOTARIZATION_ISSUER_ID APPLE_NOTARIZATION_ISSUER_ID)"
+signing_identity="$(resolve_env SUPERZET_MACOS_SIGNING_IDENTITY MACOS_SIGNING_IDENTITY)"
+sentry_auth_token="$(resolve_env SUPERZET_SENTRY_AUTH_TOKEN SENTRY_AUTH_TOKEN)"
+sentry_project="$(resolve_env SUPERZET_SENTRY_PROJECT SENTRY_PROJECT)"
+sentry_organization="$(resolve_env SUPERZET_SENTRY_ORG SENTRY_ORG)"
+
+if [[ -n "${sentry_auth_token}" ]]; then
+    export SENTRY_AUTH_TOKEN="${sentry_auth_token}"
+fi
 
 if [[ -z "${CARGO_TARGET_DIR:-}" ]]; then
     tmp_root="${TMPDIR:-/tmp}"
@@ -61,11 +81,13 @@ shift $((OPTIND-1))
 
 # Get release channel
 pushd crates/zed
-channel="${ZED_RELEASE_CHANNEL:-$(<RELEASE_CHANNEL)}"
+channel="${SUPERZET_RELEASE_CHANNEL:-${ZED_RELEASE_CHANNEL:-$(<RELEASE_CHANNEL)}}"
+export SUPERZET_RELEASE_CHANNEL="${channel}"
 export ZED_RELEASE_CHANNEL="${channel}"
 export RELEASE_CHANNEL="${channel}"
 popd
 
+export SUPERZET_BUNDLE=true
 export ZED_BUNDLE=true
 
 cargo_bundle_version=$(cargo -q bundle --help 2>&1 | head -n 1 || echo "")
@@ -129,24 +151,29 @@ else
     echo "cargo::warning=Missing ${document_icon_source}; macOS document icons may not appear in Finder."
 fi
 
-if [[ -n "${MACOS_CERTIFICATE:-}" && -n "${MACOS_CERTIFICATE_PASSWORD:-}" && -n "${APPLE_NOTARIZATION_KEY:-}" && -n "${APPLE_NOTARIZATION_KEY_ID:-}" && -n "${APPLE_NOTARIZATION_ISSUER_ID:-}" ]]; then
+if [[ -n "${macos_certificate}" && -n "${macos_certificate_password}" && -n "${apple_notarization_key}" && -n "${apple_notarization_key_id}" && -n "${apple_notarization_issuer_id}" ]]; then
+    if [[ -z "${signing_identity}" ]]; then
+        echo "SUPERZET_MACOS_SIGNING_IDENTITY or MACOS_SIGNING_IDENTITY is required for a signed release build."
+        exit 1
+    fi
+
     can_code_sign=true
 
     echo "Setting up keychain for code signing..."
-    security create-keychain -p "$MACOS_CERTIFICATE_PASSWORD" zed.keychain || echo ""
-    security default-keychain -s zed.keychain
-    security unlock-keychain -p "$MACOS_CERTIFICATE_PASSWORD" zed.keychain
+    security create-keychain -p "$macos_certificate_password" superzet.keychain || echo ""
+    security default-keychain -s superzet.keychain
+    security unlock-keychain -p "$macos_certificate_password" superzet.keychain
     # Calling set-keychain-settings without `-t` disables the auto-lock timeout
-    security set-keychain-settings zed.keychain
-    echo "$MACOS_CERTIFICATE" | base64 --decode > /tmp/zed-certificate.p12
-    security import /tmp/zed-certificate.p12 -k zed.keychain -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
-    rm /tmp/zed-certificate.p12
-    security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$MACOS_CERTIFICATE_PASSWORD" zed.keychain
+    security set-keychain-settings superzet.keychain
+    echo "$macos_certificate" | base64 --decode > /tmp/superzet-certificate.p12
+    security import /tmp/superzet-certificate.p12 -k superzet.keychain -P "$macos_certificate_password" -T /usr/bin/codesign
+    rm /tmp/superzet-certificate.p12
+    security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$macos_certificate_password" superzet.keychain
 
     function cleanup() {
         echo "Cleaning up keychain"
         security default-keychain -s login.keychain
-        security delete-keychain zed.keychain
+        security delete-keychain superzet.keychain
     }
 
     trap cleanup EXIT
@@ -213,25 +240,23 @@ function sign_app_binaries() {
     if [[ $can_code_sign = true ]]; then
         echo "Code signing binaries"
         # sequence of codesign commands modeled after this example: https://developer.apple.com/forums/thread/701514
-        /usr/bin/codesign --deep --force --timestamp --options runtime --sign "$IDENTITY" "${app_path}/Contents/MacOS/cli" -v
-        /usr/bin/codesign --deep --force --timestamp --options runtime --sign "$IDENTITY" "${app_path}/Contents/MacOS/git" -v
-        /usr/bin/codesign --deep --force --timestamp --options runtime --entitlements crates/zed/resources/zed.entitlements --sign "$IDENTITY" "${app_path}/Contents/MacOS/superzet" -v
-        /usr/bin/codesign --force --timestamp --options runtime --entitlements crates/zed/resources/zed.entitlements --sign "$IDENTITY" "${app_path}" -v
+        /usr/bin/codesign --deep --force --timestamp --options runtime --sign "$signing_identity" "${app_path}/Contents/MacOS/cli" -v
+        /usr/bin/codesign --deep --force --timestamp --options runtime --sign "$signing_identity" "${app_path}/Contents/MacOS/git" -v
+        /usr/bin/codesign --deep --force --timestamp --options runtime --entitlements crates/zed/resources/zed.entitlements --sign "$signing_identity" "${app_path}/Contents/MacOS/superzet" -v
+        /usr/bin/codesign --force --timestamp --options runtime --entitlements crates/zed/resources/zed.entitlements --sign "$signing_identity" "${app_path}" -v
     else
-        echo "One or more of the following variables are missing: MACOS_CERTIFICATE, MACOS_CERTIFICATE_PASSWORD, APPLE_NOTARIZATION_KEY, APPLE_NOTARIZATION_KEY_ID, APPLE_NOTARIZATION_ISSUER_ID"
+        echo "One or more of the required signing variables are missing: SUPERZET_MACOS_CERTIFICATE, SUPERZET_MACOS_CERTIFICATE_PASSWORD, SUPERZET_APPLE_NOTARIZATION_KEY, SUPERZET_APPLE_NOTARIZATION_KEY_ID, SUPERZET_APPLE_NOTARIZATION_ISSUER_ID"
+        echo "Legacy aliases MACOS_CERTIFICATE, MACOS_CERTIFICATE_PASSWORD, APPLE_NOTARIZATION_KEY, APPLE_NOTARIZATION_KEY_ID, and APPLE_NOTARIZATION_ISSUER_ID are still supported."
 
         echo "====== WARNING ======"
         echo "This bundle is being signed without all entitlements, some features (e.g. universal links) will not work"
         echo "====== WARNING ======"
 
-        # NOTE: if you need to test universal links you have a few paths forward:
-        # - create a PR and tag it with the `run-bundling` label, and download the .dmg file from there.
-        # - get a signing key for the MQ55VZLNZQ team from Nathan.
-        # - create your own signing key, and update references to MQ55VZLNZQ to your own team ID
-        # then comment out this line.
+        # Local unsigned bundles omit associated domains so ad hoc signing can succeed.
         cat crates/zed/resources/zed.entitlements | sed '/com.apple.developer.associated-domains/,+1d' > "${app_path}/Contents/Resources/zed.entitlements"
 
-        codesign --force --deep --entitlements "${app_path}/Contents/Resources/zed.entitlements" --sign ${MACOS_SIGNING_KEY:- -} "${app_path}" -v
+        unsigned_signing_key="$(resolve_env SUPERZET_MACOS_SIGNING_KEY MACOS_SIGNING_KEY)"
+        codesign --force --deep --entitlements "${app_path}/Contents/Resources/zed.entitlements" --sign ${unsigned_signing_key:- -} "${app_path}" -v
     fi
 
     bundle_name=$(basename "$app_path")
@@ -257,7 +282,7 @@ function sign_app_binaries() {
     else
         dmg_target_directory="${CARGO_TARGET_DIR}/${target_triple}/${target_dir}"
         dmg_source_directory="${dmg_target_directory}/dmg"
-        dmg_file_path="${dmg_target_directory}/Zed-${arch_suffix}.dmg"
+        dmg_file_path="${dmg_target_directory}/superzet-${arch_suffix}.dmg"
         xcode_bin_dir_path="$(xcode-select -p)/usr/bin"
 
         rm -rf ${dmg_source_directory}
@@ -269,10 +294,10 @@ function sign_app_binaries() {
         ln -s /Applications ${dmg_source_directory}
 
         echo "Creating final DMG at ${dmg_file_path} using ${dmg_source_directory}"
-        hdiutil create -volname Zed -srcfolder "${dmg_source_directory}" -ov -format UDZO "${dmg_file_path}"
+        hdiutil create -volname superzet -srcfolder "${dmg_source_directory}" -ov -format UDZO "${dmg_file_path}"
 
         # If someone runs this bundle script locally, a symlink will be placed in `dmg_source_directory`.
-        # This symlink causes CPU issues with Zed if the Zed codebase is the project being worked on, so we simply remove it for now.
+        # Removing it avoids local Finder churn while iterating on the source tree.
         echo "Removing symlink to /Applications from ${dmg_source_directory}"
         rm ${dmg_source_directory}/Applications
 
@@ -282,9 +307,9 @@ function sign_app_binaries() {
 
         if [[ $can_code_sign = true ]]; then
             echo "Notarizing DMG with Apple"
-            /usr/bin/codesign --deep --force --timestamp --options runtime --sign "$IDENTITY" "$(pwd)/${dmg_file_path}" -v
-            echo "$APPLE_NOTARIZATION_KEY" > "$notarization_key_file"
-            "${xcode_bin_dir_path}/notarytool" submit --wait --key "$notarization_key_file" --key-id "$APPLE_NOTARIZATION_KEY_ID" --issuer "$APPLE_NOTARIZATION_ISSUER_ID" "${dmg_file_path}"
+            /usr/bin/codesign --deep --force --timestamp --options runtime --sign "$signing_identity" "$(pwd)/${dmg_file_path}" -v
+            echo "$apple_notarization_key" > "$notarization_key_file"
+            "${xcode_bin_dir_path}/notarytool" submit --wait --key "$notarization_key_file" --key-id "$apple_notarization_key_id" --issuer "$apple_notarization_issuer_id" "${dmg_file_path}"
             rm "$notarization_key_file"
             "${xcode_bin_dir_path}/stapler" staple "${dmg_file_path}"
         fi
@@ -300,15 +325,15 @@ function sign_binary() {
 
     if [[ $can_code_sign = true ]]; then
         echo "Code signing executable $binary_path"
-        /usr/bin/codesign --deep --force --timestamp --options runtime --entitlements crates/zed/resources/zed.entitlements --sign "$IDENTITY" "${binary_path}" -v
+        /usr/bin/codesign --deep --force --timestamp --options runtime --entitlements crates/zed/resources/zed.entitlements --sign "$signing_identity" "${binary_path}" -v
     fi
 }
 
 function upload_debug_symbols() {
     if [ "$local_install" = true ]; then
         echo "local install; skipping sentry upload."
-    elif [[ -n "${SENTRY_AUTH_TOKEN:-}" ]]; then
-        echo "Uploading zed debug symbols to sentry..."
+    elif [[ -n "${sentry_auth_token}" ]]; then
+        echo "Uploading superzet debug symbols to sentry..."
         dsymutil_log="${CARGO_TARGET_DIR}/dsymutil.log"
         if ! dsymutil --flat "${CARGO_TARGET_DIR}/${target_triple}/${target_dir}/superzet" 2> "${dsymutil_log}"; then
             echo "dsymutil failed"
@@ -325,7 +350,7 @@ function upload_debug_symbols() {
         # Try uploading up to 3 times
         for attempt in 1 2 3; do
             echo "Sentry upload attempt $attempt..."
-            if sentry-cli debug-files upload --include-sources --wait -p zed -o zed-dev \
+            if sentry-cli debug-files upload --include-sources --wait -p "${sentry_project:-superzet}" -o "${sentry_organization:-superzet}" \
                 "${CARGO_TARGET_DIR}/${target_triple}/${target_dir}/superzet.dwarf" \
                 "${CARGO_TARGET_DIR}/${target_triple}/${target_dir}/remote_server.dwarf"; then
                 break

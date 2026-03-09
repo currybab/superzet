@@ -1,26 +1,30 @@
 ---
-title: Update Zed
-description: "Zed is designed to keep itself up to date automatically. You can always update this behavior in your settings."
+title: Update superzet
+description: How preview updates work in superzet.
 ---
 
-# Update Zed
+# Update superzet
 
-Zed is designed to keep itself up to date automatically. You can always update this behavior in your settings.
+## In-App Updates
 
-## Auto-updates
+Bundled macOS preview builds check `superzet.dev/releases` for new preview DMGs.
 
-By default, Zed checks for updates and installs them automatically the next time you restart the app. You’ll always be running the latest version with no extra steps.
+When an update is available:
 
-If an update is available, Zed will download it in the background and apply it on restart.
+- the app downloads the new bundle in the background
+- the update is applied on restart
+- release notes open from the same `superzet.dev/releases` route and redirect to the matching GitHub release page
 
-## How to check your current version
+## When Auto-Update Does Not Run
 
-To check which version of Zed you're using:
+Auto-update is not expected to run for:
 
-Open the Command Palette (Cmd+Shift+P on macOS, Ctrl+Shift+P on Linux/Windows).
+- local development builds
+- source builds
+- non-bundled binaries
 
-Type and select `zed: about`. A modal will appear with your version information.
+In those cases, update by rebuilding from source or installing a newer preview DMG manually.
 
-## How to control update behavior
+## Operator Notes
 
-If you want to turn off auto-updates, open the Settings Editor (Cmd ,) and find `Auto Update` under General Settings.
+The update feed is backed by GitHub Releases plus a thin Cloudflare worker. See [Releasing](./development/releasing.md) for the required infrastructure and secrets.

@@ -1,123 +1,63 @@
 ---
-title: Zed on macOS
-description: "Zed is developed primarily on macOS, making it a first-class platform with full feature support."
+title: superzet on macOS
+description: Install and run the current public preview of superzet on macOS.
 ---
 
-# Zed on macOS
+# superzet on macOS
 
-Zed is developed primarily on macOS, making it a first-class platform with full feature support.
+macOS is the first public release target for `superzet`.
 
-## Installing Zed
+## Installing the Preview Build
 
-Download Zed from the [download page](https://zed.dev/download). The download is a `.dmg` file—open it and drag Zed to your Applications folder.
+Download the latest preview DMG from:
 
-For the preview build, which receives updates about a week ahead of stable, visit the [preview releases page](https://zed.dev/releases/preview).
+- [GitHub Releases](https://github.com/nerdface-ai/superzet/releases)
 
-After installation, Zed checks for updates automatically and prompts you when a new version is available.
+Then:
 
-### Homebrew
+1. open `superzet-aarch64.dmg`
+2. drag `superzet.app` into `/Applications`
+3. launch the app from Applications
 
-You can also install Zed using Homebrew:
+## Building From Source
 
-```sh
-brew install --cask zed
-```
-
-For the preview version:
+For local development:
 
 ```sh
-brew install --cask zed@preview
+cargo run -p superzet
 ```
 
-### Building from Source
-
-To build Zed from source, see the [macOS development documentation](./development/macos.md).
-
-## System Requirements
-
-- macOS 10.15.7 (Catalina) or later
-- Apple Silicon (M1/M2/M3/M4) or Intel processor
-
-Zed uses Metal for GPU-accelerated rendering, which is available on all supported macOS versions.
-
-## Installing the CLI
-
-Zed includes a command-line tool for opening files and projects from Terminal. To install it:
-
-1. Open Zed
-2. Open the command palette with `Cmd+Shift+P`
-3. Run `cli: install`
-
-This creates a `zed` command in `/usr/local/bin`. You can then open files and folders:
+For a bundled macOS build:
 
 ```sh
-zed .                    # Open current folder
-zed file.txt             # Open a file
-zed project/ file.txt    # Open a folder and a file
+./script/bundle-mac aarch64-apple-darwin
 ```
 
-See the [CLI Reference](./reference/cli.md) for all available options.
+## Current Support Level
 
-## Uninstall
+- public preview binary: Apple Silicon
+- source builds: inherited upstream development paths still exist for Intel and other platforms, but they are not the focus of the public release flow
 
-1. Quit Zed if it's running
-2. Drag Zed from Applications to the Trash
-3. Optionally, remove your settings and extensions:
+## Updates
 
-```sh
-rm -rf ~/.config/zed
-rm -rf ~/Library/Application\ Support/Zed
-rm -rf ~/Library/Caches/Zed
-rm -rf ~/Library/Logs/Zed
-rm -rf ~/Library/Saved\ Application\ State/dev.zed.Zed.savedState
-```
+Bundled preview builds can update through the `superzet.dev/releases` feed.
 
-If you installed the CLI, remove it with:
-
-```sh
-rm /usr/local/bin/zed
-```
+Development builds and source builds should be updated manually.
 
 ## Troubleshooting
 
-### Zed won't open or shows "damaged" warning
+### Gatekeeper or quarantine warnings
 
-If macOS reports that Zed is damaged or can't be opened, it's likely a Gatekeeper issue. Try:
-
-1. Right-click (or Control-click) on Zed in Applications
-2. Select "Open" from the context menu
-3. Click "Open" in the dialog that appears
-
-This tells macOS to trust the application.
-
-If that doesn't work, remove the quarantine attribute:
+If macOS blocks the app after download, remove the quarantine attribute:
 
 ```sh
-xattr -cr /Applications/Zed.app
+xattr -cr /Applications/superzet.app
 ```
 
-### CLI command not found
+### Log file
 
-If the `zed` command isn't available after installation:
+Use the command palette to open the log, or inspect:
 
-1. Check that `/usr/local/bin` is in your PATH
-2. Try reinstalling the CLI via `cli: install` in the command palette
-3. Open a new terminal window to reload your PATH
-
-### GPU or rendering issues
-
-Zed uses Metal for rendering. If you experience graphical glitches:
-
-1. Ensure macOS is up to date
-2. Restart your Mac to reset the GPU state
-3. Check Activity Monitor for GPU pressure from other apps
-
-### High memory or CPU usage
-
-If Zed uses more resources than expected:
-
-1. Check for runaway language servers in the terminal output (`zed: open log`)
-2. Try disabling extensions one by one to identify conflicts
-3. For large projects, consider using [project settings](./reference/all-settings.md#file-scan-exclusions) to exclude unnecessary folders from indexing
-
-For additional help, see the [Troubleshooting guide](./troubleshooting.md) or visit the [Zed Discord](https://discord.gg/zed-community).
+```sh
+~/Library/Logs/superzet/superzet.log
+```

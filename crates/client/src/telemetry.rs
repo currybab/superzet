@@ -79,20 +79,26 @@ const FLUSH_INTERVAL: Duration = Duration::from_secs(1);
 
 #[cfg(not(debug_assertions))]
 const FLUSH_INTERVAL: Duration = Duration::from_secs(60 * 5);
+
+fn env_var(primary: &str, legacy: &str) -> Option<String> {
+    env::var(primary).ok().or_else(|| env::var(legacy).ok())
+}
+
 static ZED_CLIENT_CHECKSUM_SEED: LazyLock<Option<Vec<u8>>> = LazyLock::new(|| {
-    option_env!("ZED_CLIENT_CHECKSUM_SEED")
+    option_env!("SUPERZET_CLIENT_CHECKSUM_SEED")
+        .or(option_env!("ZED_CLIENT_CHECKSUM_SEED"))
         .map(|s| s.as_bytes().into())
         .or_else(|| {
-            env::var("ZED_CLIENT_CHECKSUM_SEED")
-                .ok()
+            env_var("SUPERZET_CLIENT_CHECKSUM_SEED", "ZED_CLIENT_CHECKSUM_SEED")
                 .map(|s| s.as_bytes().into())
         })
 });
 
 pub static MINIDUMP_ENDPOINT: LazyLock<Option<String>> = LazyLock::new(|| {
-    option_env!("ZED_MINIDUMP_ENDPOINT")
+    option_env!("SUPERZET_MINIDUMP_ENDPOINT")
+        .or(option_env!("ZED_MINIDUMP_ENDPOINT"))
         .map(str::to_string)
-        .or_else(|| env::var("ZED_MINIDUMP_ENDPOINT").ok())
+        .or_else(|| env_var("SUPERZET_MINIDUMP_ENDPOINT", "ZED_MINIDUMP_ENDPOINT"))
 });
 
 static DOTNET_PROJECT_FILES_REGEX: LazyLock<Regex> = LazyLock::new(|| {

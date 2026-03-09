@@ -1957,7 +1957,7 @@ impl RemoteServerProjects {
                                         .inset(true)
                                         .spacing(ui::ListItemSpacing::Sparse)
                                         .start_slot(Icon::new(IconName::File).color(Color::Muted))
-                                        .child(Label::new("Open Zed Log"))
+                                        .child(Label::new("Open superzet Log"))
                                         .on_click(cx.listener(|_, _, window, cx| {
                                             window.dispatch_action(Box::new(OpenLog), cx);
                                             cx.emit(DismissEvent);
@@ -2119,7 +2119,7 @@ impl RemoteServerProjects {
                                             .icon_size(IconSize::XSmall)
                                             .on_click(|_, _, cx| {
                                                 cx.open_url(
-                                                    "https://zed.dev/docs/remote-development",
+                                                    "https://superzet.dev/docs/remote-development",
                                                 );
                                             }),
                                     ),

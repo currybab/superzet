@@ -1,41 +1,36 @@
 name: Report a crash
-description: Zed is crashing or freezing or hanging.
+description: superzet crashes, freezes, or hangs.
 type: Crash
 labels: "state:needs triage"
 body:
   - type: textarea
     attributes:
       label: Reproduction steps
-      description: A step-by-step description of how to reproduce the crash from a **clean Zed install**. The more context you provide, the easier it is to find and fix the problem fast.
+      description: Describe the shortest reliable way to trigger the crash or hang.
       placeholder: |
-        1. Start Zed
-        2. Perform an action
-        3. Zed crashes
+        1. Start superzet
+        2. Open ...
+        3. The app crashes
     validations:
       required: true
   - type: textarea
     attributes:
-      label: Zed version and system specs
-      description: |
-        Open the command palette in Zed, then type “zed: copy system specs into clipboard”.
+      label: superzet version and system specs
+      description: In the app, copy system specs from the command palette and paste them here.
       placeholder: |
-        Zed: v0.215.0 (Zed Nightly bfe141ea79aa4984028934067ba75c48d99136ae)
-        OS: macOS 15.1
+        superzet: v0.1.0
+        OS: macOS 15.3
         Memory: 36 GiB
         Architecture: aarch64
     validations:
       required: true
   - type: textarea
     attributes:
-      label: Attach Zed log file
-      description: |
-        Open the command palette in Zed, then type `zed: open log` to see the last 1000 lines. Or type `zed: reveal log in file manager` in the command palette to reveal the log file itself.
-
-        ⚠️ **Please review your log file for secrets (API keys, tokens, etc.) and partially or fully redact them before posting.**
+      label: Attach log output
+      description: Open the app log from the command palette and paste the relevant lines here after redacting secrets.
       value: |
-        <details><summary>Zed.log</summary>
+        <details><summary>superzet.log</summary>
 
-        <!-- Paste your log inside the code block. -->
         ```log
 
         ```

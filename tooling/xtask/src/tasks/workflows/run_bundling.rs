@@ -3,7 +3,7 @@ use std::path::Path;
 use crate::tasks::workflows::{
     nix_build::build_nix,
     release::ReleaseBundleJobs,
-    runners::{Arch, Platform, ReleaseChannel},
+    runners::{Arch, Platform},
     steps::{DEFAULT_REPOSITORY_OWNER_GUARD, FluentBuilder, NamedJob, dependant_job, named},
     vars::{assets, bundle_envs},
 };
@@ -14,12 +14,12 @@ use indoc::indoc;
 
 pub fn run_bundling() -> Workflow {
     let bundle = ReleaseBundleJobs {
-        linux_aarch64: bundle_linux(Arch::AARCH64, None, &[]),
-        linux_x86_64: bundle_linux(Arch::X86_64, None, &[]),
-        mac_aarch64: bundle_mac(Arch::AARCH64, None, &[]),
-        mac_x86_64: bundle_mac(Arch::X86_64, None, &[]),
-        windows_aarch64: bundle_windows(Arch::AARCH64, None, &[]),
-        windows_x86_64: bundle_windows(Arch::X86_64, None, &[]),
+        linux_aarch64: bundle_linux(Arch::AARCH64, &[]),
+        linux_x86_64: bundle_linux(Arch::X86_64, &[]),
+        mac_aarch64: bundle_mac(Arch::AARCH64, &[]),
+        mac_x86_64: bundle_mac(Arch::X86_64, &[]),
+        windows_aarch64: bundle_windows(Arch::AARCH64, &[]),
+        windows_x86_64: bundle_windows(Arch::X86_64, &[]),
     };
     let nix_linux_x86_64 = nix_job(Platform::Linux, Arch::X86_64);
     let nix_mac_aarch64 = nix_job(Platform::Mac, Arch::AARCH64);
@@ -73,11 +73,7 @@ fn bundle_job(deps: &[&NamedJob]) -> Job {
         .timeout_minutes(60u32)
 }
 
-pub(crate) fn bundle_mac(
-    arch: Arch,
-    release_channel: Option<ReleaseChannel>,
-    deps: &[&NamedJob],
-) -> NamedJob {
+pub(crate) fn bundle_mac(arch: Arch, deps: &[&NamedJob]) -> NamedJob {
     pub fn bundle_mac(arch: Arch) -> Step<Run> {
         named::bash(&format!("./script/bundle-mac {arch}-apple-darwin"))
     }
@@ -96,9 +92,6 @@ pub(crate) fn bundle_mac(
             .runs_on(runners::MAC_DEFAULT)
             .envs(bundle_envs(platform))
             .add_step(steps::checkout_repo())
-            .when_some(release_channel, |job, release_channel| {
-                job.add_step(set_release_channel(platform, release_channel))
-            })
             .add_step(steps::setup_node())
             .add_step(steps::setup_sentry())
             .add_step(steps::clear_target_dir_if_large(runners::Platform::Mac))
@@ -127,11 +120,7 @@ pub fn upload_artifact(path: &str) -> Step<Use> {
         .add_with(("if-no-files-found", "error"))
 }
 
-pub(crate) fn bundle_linux(
-    arch: Arch,
-    release_channel: Option<ReleaseChannel>,
-    deps: &[&NamedJob],
-) -> NamedJob {
+pub(crate) fn bundle_linux(arch: Arch, deps: &[&NamedJob]) -> NamedJob {
     let platform = Platform::Linux;
     let artifact_name = match arch {
         Arch::X86_64 => assets::LINUX_X86_64,
@@ -149,9 +138,6 @@ pub(crate) fn bundle_linux(
             .add_env(Env::new("CC", "clang-18"))
             .add_env(Env::new("CXX", "clang++-18"))
             .add_step(steps::checkout_repo())
-            .when_some(release_channel, |job, release_channel| {
-                job.add_step(set_release_channel(platform, release_channel))
-            })
             .add_step(steps::setup_sentry())
             .map(steps::install_linux_dependencies)
             .add_step(steps::script("./script/bundle-linux"))
@@ -162,11 +148,7 @@ pub(crate) fn bundle_linux(
     }
 }
 
-pub(crate) fn bundle_windows(
-    arch: Arch,
-    release_channel: Option<ReleaseChannel>,
-    deps: &[&NamedJob],
-) -> NamedJob {
+pub(crate) fn bundle_windows(arch: Arch, deps: &[&NamedJob]) -> NamedJob {
     let platform = Platform::Windows;
     pub fn bundle_windows(arch: Arch) -> Step<Run> {
         let step = match arch {
@@ -189,38 +171,11 @@ pub(crate) fn bundle_windows(
             .runs_on(runners::WINDOWS_DEFAULT)
             .envs(bundle_envs(platform))
             .add_step(steps::checkout_repo())
-            .when_some(release_channel, |job, release_channel| {
-                job.add_step(set_release_channel(platform, release_channel))
-            })
             .add_step(steps::setup_sentry())
             .add_step(bundle_windows(arch))
             .add_step(upload_artifact(&format!("target/{artifact_name}")))
             .add_step(upload_artifact(&format!(
                 "target/{remote_server_artifact_name}"
             ))),
-    }
-}
-
-fn set_release_channel(platform: Platform, release_channel: ReleaseChannel) -> Step<Run> {
-    match release_channel {
-        ReleaseChannel::Nightly => set_release_channel_to_nightly(platform),
-    }
-}
-
-fn set_release_channel_to_nightly(platform: Platform) -> Step<Run> {
-    match platform {
-        Platform::Linux | Platform::Mac => named::bash(indoc::indoc! {r#"
-            set -eu
-            version=$(git rev-parse --short HEAD)
-            echo "Publishing version: ${version} on release channel nightly"
-            echo "nightly" > crates/zed/RELEASE_CHANNEL
-        "#}),
-        Platform::Windows => named::pwsh(indoc::indoc! {r#"
-            $ErrorActionPreference = "Stop"
-            $version = git rev-parse --short HEAD
-            Write-Host "Publishing version: $version on release channel nightly"
-            "nightly" | Set-Content -Path "crates/zed/RELEASE_CHANNEL"
-        "#})
-        .working_directory("${{ env.ZED_WORKSPACE }}"),
     }
 }

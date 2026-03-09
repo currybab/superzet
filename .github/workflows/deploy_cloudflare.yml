@@ -1,4 +1,4 @@
-name: Deploy Docs
+name: Deploy Cloudflare
 
 on:
   push:
@@ -6,10 +6,10 @@ on:
       - main
 
 jobs:
-  deploy-docs:
-    name: Deploy Docs
-    if: github.repository_owner == 'zed-industries'
-    runs-on: namespace-profile-16x32-ubuntu-2204
+  deploy-cloudflare:
+    name: Deploy Cloudflare
+    if: github.repository_owner == 'nerdface-ai'
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repo
@@ -18,7 +18,7 @@ jobs:
           clean: false
 
       - name: Set up default .cargo/config.toml
-        run: cp ./.cargo/collab-config.toml ./.cargo/config.toml
+        run: cp ./.cargo/ci-config.toml ./.cargo/config.toml
 
       - name: Build docs
         uses: ./.github/actions/build_docs
@@ -40,21 +40,28 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: r2 object put -f script/install.sh zed-open-source-website-assets/install.sh
+          command: r2 object put -f script/install.sh superzet-open-source-website-assets/install.sh
 
       - name: Deploy Docs Workers
         uses: cloudflare/wrangler-action@da0e0dfe58b7a431659754fdf3f186c529afbe65 # v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: deploy .cloudflare/docs-proxy/src/worker.js
+          command: deploy --config .cloudflare/docs-proxy/wrangler.toml
 
-      - name: Deploy Install Workers
+      - name: Deploy Install Worker
         uses: cloudflare/wrangler-action@da0e0dfe58b7a431659754fdf3f186c529afbe65 # v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: deploy .cloudflare/docs-proxy/src/worker.js
+          command: deploy --config .cloudflare/open-source-website-assets/wrangler.toml
+
+      - name: Deploy Release Worker
+        uses: cloudflare/wrangler-action@da0e0dfe58b7a431659754fdf3f186c529afbe65 # v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy --config .cloudflare/release-assets/wrangler.toml
 
       - name: Preserve Wrangler logs
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

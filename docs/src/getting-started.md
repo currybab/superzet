@@ -1,90 +1,62 @@
 ---
-title: Getting Started with Zed
-description: Get started with Zed, the fast open-source code editor. Essential commands, environment setup, and navigation basics.
+title: Getting Started with superzet
+description: Get started with superzet, the local-first workspace shell for coding agents.
 ---
 
 # Getting Started
 
-Zed is an open-source code editor with built-in collaboration and AI tools.
-
-This guide covers the essential commands, environment setup, and navigation basics.
+`superzet` is a local-first shell for working across repositories, worktrees, terminals, diffs, and editor panes in one native app window.
 
 ## Quick Start
 
-### Welcome Page
+### 1. Open the app and add a repository
 
-When you open Zed without a folder, you see the welcome page in the main editor area. The welcome page offers quick actions to open a folder, clone a repository, or view documentation. Once you open a folder or file, the welcome page disappears. If you split the editor into multiple panes, the welcome page appears only in the center pane when empty—other panes show a standard empty state.
+The main window is built around multiple local workspaces. Use the welcome page or sidebar controls to open an existing repository, then create or switch worktrees from there.
 
-To reopen the welcome page, close all items in the center pane or use the command palette to search for "Welcome".
+### 2. Learn the core shortcuts
 
-### 1. Open a Project
+| Action | macOS |
+| --- | --- |
+| Command palette | `Cmd+Shift+P` |
+| Open file | `Cmd+P` |
+| Search symbols | `Ctrl+Shift+T` |
+| New terminal in center pane | `Cmd+T` |
+| Toggle terminal panel | `` Ctrl+` `` |
+| Open settings | `Cmd+,` |
 
-Open a folder from the command line:
+### 3. Work from terminals first
 
-```sh
-zed ~/projects/my-app
-```
+The default `superzet` workflow expects you to run external coding agents and local tooling from terminals.
 
-Or use `Cmd+O` (macOS) / `Ctrl+O` (Linux/Windows) to open a folder from within Zed.
+- Use `Cmd+T` for a center-pane terminal tab
+- Use `` Ctrl+` `` to show or hide the terminal panel
+- Keep diffs, files, and terminals visible at the same time instead of constantly context switching
 
-### 2. Learn the Essential Commands
+### 4. Tune the workspace shell
 
-| Action          | macOS         | Linux/Windows  |
-| --------------- | ------------- | -------------- |
-| Command palette | `Cmd+Shift+P` | `Ctrl+Shift+P` |
-| Go to file      | `Cmd+P`       | `Ctrl+P`       |
-| Go to symbol    | `Cmd+Shift+O` | `Ctrl+Shift+O` |
-| Find in project | `Cmd+Shift+F` | `Ctrl+Shift+F` |
-| Toggle terminal | `` Ctrl+` ``  | `` Ctrl+` ``   |
-| Open settings   | `Cmd+,`       | `Ctrl+,`       |
+Good first settings:
 
-The command palette (`Cmd+Shift+P`) is your gateway to every action in Zed. If you forget a shortcut, search for it there.
+- theme and font
+- startup workspace behavior
+- keybindings
+- project-specific tasks
 
-### 3. Configure Your Editor
+See [Running & Testing](./running-testing.md), [Terminal](./terminal.md), and [All Settings](./reference/all-settings.md).
 
-Open the Settings Editor with `Cmd+,` (macOS) or `Ctrl+,` (Linux/Windows). Search for any setting and change it directly.
+## Current Product Scope
 
-Common first changes:
+The default build is intentionally narrow:
 
-- **Theme**: Press `Cmd+K Cmd+T` (macOS) or `Ctrl+K Ctrl+T` (Linux/Windows) to open the theme selector
-- **Font**: Search for `buffer_font_family` in Settings
-- **Format on save**: Search for `format_on_save` and set to `on`
+- local repositories and worktrees
+- native editor, panes, and diffs
+- terminal-driven agent workflows
 
-### 4. Set Up Your Language
+Not part of the public preview scope:
 
-Zed includes built-in support for many languages. For others, install the extension:
+- collaboration
+- hosted AI surfaces
+- remote-server distribution
 
-1. Open Extensions with `Cmd+Shift+X` (macOS) or `Ctrl+Shift+X` (Linux/Windows)
-2. Search for your language
-3. Click Install
+## Public Preview Availability
 
-See [Languages](./languages.md) for language-specific setup instructions.
-
-### 5. Try AI Features
-
-Zed includes built-in AI assistance. Open the Agent Panel with `Cmd+Shift+A` (macOS) or `Ctrl+Shift+A` (Linux/Windows) to start a conversation, or use `Cmd+Enter` (macOS) / `Ctrl+Enter` (Linux/Windows) for inline assistance.
-
-See [AI Overview](./ai/overview.md) to configure providers and learn what's possible.
-
-## Coming from Another Editor?
-
-We have dedicated guides for switching from other editors:
-
-- [VS Code](./migrate/vs-code.md) — Import settings, map keybindings, find equivalent features
-- [IntelliJ IDEA](./migrate/intellij.md) — Adapt to Zed's approach to navigation and refactoring
-- [PyCharm](./migrate/pycharm.md) — Set up Python development in Zed
-- [WebStorm](./migrate/webstorm.md) — Configure JavaScript/TypeScript workflows
-- [RustRover](./migrate/rustrover.md) — Rust development in Zed
-
-You can also enable familiar keybindings:
-
-- **Vim**: Enable `vim_mode` in settings. See [Vim Mode](./vim.md).
-- **Helix**: Enable `helix_mode` in settings. See [Helix Mode](./helix.md).
-
-## Join the Community
-
-Zed is open source. Join us on GitHub or in Discord to contribute code, report bugs, or suggest features.
-
-- [Discord](https://discord.com/invite/zedindustries)
-- [GitHub Discussions](https://github.com/zed-industries/zed/discussions)
-- [Zed Reddit](https://www.reddit.com/r/ZedEditor)
+The first public binary release is currently macOS preview only. Other platforms are still source-build territory.

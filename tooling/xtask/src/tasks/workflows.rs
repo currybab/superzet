@@ -6,20 +6,17 @@ use std::path::{Path, PathBuf};
 
 use crate::tasks::workflow_checks::{self};
 
-mod after_release;
 mod autofix_pr;
 mod bump_patch_version;
 mod cherry_pick;
 mod compare_perf;
 mod danger;
-mod deploy_collab;
 mod extension_bump;
 mod extension_tests;
 mod extension_workflow_rollout;
 mod extensions;
 mod nix_build;
 mod publish_extension_cli;
-mod release_nightly;
 mod run_bundling;
 
 mod release;
@@ -91,7 +88,7 @@ impl WorkflowFile {
 
 #[derive(PartialEq, Eq, strum::EnumIter)]
 pub enum WorkflowType {
-    /// Workflows living in the Zed repository
+    /// Workflows living in the superzet repository
     Zed,
     /// Workflows living in the `zed-extensions/workflows` repository that are
     /// required workflows for PRs to the extension organization
@@ -110,7 +107,7 @@ impl WorkflowType {
             ),
             workflow_name,
             (*self != WorkflowType::Zed)
-                .then_some(" within the Zed repository.")
+                .then_some(" within the superzet repository.")
                 .unwrap_or_default(),
         )
     }
@@ -130,19 +127,16 @@ pub fn run_workflows(_: GenerateWorkflowArgs) -> Result<()> {
     }
 
     let workflows = [
-        WorkflowFile::zed(after_release::after_release),
         WorkflowFile::zed(autofix_pr::autofix_pr),
         WorkflowFile::zed(bump_patch_version::bump_patch_version),
         WorkflowFile::zed(cherry_pick::cherry_pick),
         WorkflowFile::zed(compare_perf::compare_perf),
         WorkflowFile::zed(danger::danger),
-        WorkflowFile::zed(deploy_collab::deploy_collab),
         WorkflowFile::zed(extension_bump::extension_bump),
         WorkflowFile::zed(extension_tests::extension_tests),
         WorkflowFile::zed(extension_workflow_rollout::extension_workflow_rollout),
         WorkflowFile::zed(publish_extension_cli::publish_extension_cli),
         WorkflowFile::zed(release::release),
-        WorkflowFile::zed(release_nightly::release_nightly),
         WorkflowFile::zed(run_agent_evals::run_agent_evals),
         WorkflowFile::zed(run_agent_evals::run_cron_unit_evals),
         WorkflowFile::zed(run_agent_evals::run_unit_evals),

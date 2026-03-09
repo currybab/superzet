@@ -6,7 +6,7 @@ export default {
     let res = await fetch(url, request);
 
     if (res.status === 404) {
-      res = await fetch("https://zed.dev/404");
+      res = await fetch("https://superzet.dev/404");
     }
 
     return res;
