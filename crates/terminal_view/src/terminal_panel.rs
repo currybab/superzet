@@ -862,6 +862,7 @@ impl TerminalPanel {
     }
 
     #[cfg(any(test, feature = "test-support"))]
+    #[allow(dead_code)]
     fn add_local_terminal_shell(
         &mut self,
         reveal_strategy: RevealStrategy,

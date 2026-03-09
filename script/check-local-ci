@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+echo "Running local CI preflight..."
+
+./script/prettier
+cargo fmt --all -- --check
+./script/check-licenses
+./script/generate-action-metadata
+cargo run -p xtask -- workflows
+
+if ! git diff --exit-code .github; then
+    echo "Workflow files changed after regeneration. Commit the generated .github updates."
+    exit 1
+fi
+
+./script/clippy
+cargo test --workspace --no-run
+
+echo "Local CI preflight passed."

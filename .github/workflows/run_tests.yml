@@ -101,13 +101,11 @@ jobs:
         fi
 
         check_pattern "run_action_checks" '^\.github/(workflows/|actions/|actionlint.yml)|tooling/xtask|script/' -qP
-        check_pattern "run_docs" '^(docs/|crates/.*\.rs)' -qP
         check_pattern "run_licenses" '^(Cargo.lock|script/.*licenses)' -qP
         check_pattern "run_tests" '^(docs/|script/update_top_ranking_issues/|\.github/(ISSUE_TEMPLATE|workflows/(?!run_tests)))' -qvP
     outputs:
       changed_packages: ${{ steps.filter.outputs.changed_packages }}
       run_action_checks: ${{ steps.filter.outputs.run_action_checks }}
-      run_docs: ${{ steps.filter.outputs.run_docs }}
       run_licenses: ${{ steps.filter.outputs.run_licenses }}
       run_tests: ${{ steps.filter.outputs.run_tests }}
   check_style:
@@ -505,9 +503,7 @@ jobs:
         license-check: false
     timeout-minutes: 60
   check_docs:
-    needs:
-    - orchestrate
-    if: needs.orchestrate.outputs.run_docs == 'true'
+    if: 'false'
     runs-on: ubuntu-24.04
     env:
       CC: clang

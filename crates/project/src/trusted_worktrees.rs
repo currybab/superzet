@@ -147,6 +147,7 @@ pub struct RemoteHostLocation {
 
 impl From<RemoteConnectionOptions> for RemoteHostLocation {
     fn from(options: RemoteConnectionOptions) -> Self {
+        #[allow(unreachable_patterns)]
         let (user_name, host_name) = match options {
             RemoteConnectionOptions::Ssh(ssh) => (
                 ssh.username.map(SharedString::new),

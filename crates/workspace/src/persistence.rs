@@ -1499,6 +1499,7 @@ impl WorkspaceDb {
         let mut name = None;
         let mut container_id = None;
         let mut use_podman = None;
+        #[allow(unreachable_patterns)]
         match options {
             RemoteConnectionOptions::Ssh(options) => {
                 kind = RemoteConnectionKind::Ssh;

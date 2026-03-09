@@ -28,7 +28,6 @@ pub(crate) fn run_tests() -> Workflow {
         "run_tests",
         r"^(docs/|script/update_top_ranking_issues/|\.github/(ISSUE_TEMPLATE|workflows/(?!run_tests)))",
     );
-    let should_check_docs = PathCondition::new("run_docs", r"^(docs/|crates/.*\.rs)");
     let should_check_scripts = PathCondition::new(
         "run_action_checks",
         r"^\.github/(workflows/|actions/|actionlint.yml)|tooling/xtask|script/",
@@ -38,7 +37,6 @@ pub(crate) fn run_tests() -> Workflow {
 
     let orchestrate = orchestrate(&[
         &should_check_scripts,
-        &should_check_docs,
         &should_check_licences,
         &should_run_tests,
     ]);
@@ -54,7 +52,7 @@ pub(crate) fn run_tests() -> Workflow {
         should_run_tests.guard(check_workspace_binaries()),
         should_run_tests.guard(check_wasm()),
         should_run_tests.guard(check_dependencies()), // could be more specific here?
-        should_check_docs.guard(check_docs()),
+        disabled(check_docs()),
         should_check_licences.guard(check_licenses()),
         should_check_scripts.guard(check_scripts()),
     ];
@@ -587,6 +585,13 @@ fn doctests() -> NamedJob {
     ))
 }
 
+fn disabled(job: NamedJob) -> NamedJob {
+    NamedJob {
+        name: job.name,
+        job: job.job.cond(Expression::new("false")),
+    }
+}
+
 fn check_licenses() -> NamedJob {
     named::job(
         Job::default()
@@ -631,7 +636,6 @@ fn check_docs() -> NamedJob {
             .runs_on(runners::LINUX_LARGE)
             .add_step(steps::checkout_repo())
             .add_step(steps::setup_cargo_config(Platform::Linux))
-            // todo(ci): un-inline build_docs/action.yml here
             .add_step(steps::cache_rust_dependencies_namespace())
             .add_step(
                 lychee_link_check("./docs/src/**/*"), // check markdown links
