@@ -1518,11 +1518,10 @@ impl WorkspaceDb {
                 use_podman = Some(options.use_podman);
                 user = Some(options.remote_user);
             }
-            #[cfg(any(test, feature = "test-support"))]
-            RemoteConnectionOptions::Mock(options) => {
+            other => {
                 kind = RemoteConnectionKind::Ssh;
-                host = Some(format!("mock-{}", options.id));
-                user = Some(format!("mock-user-{}", options.id));
+                host = Some(other.display_name());
+                user = None;
             }
         }
         Self::get_or_create_remote_connection_query(

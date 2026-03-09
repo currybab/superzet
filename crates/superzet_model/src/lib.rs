@@ -1015,7 +1015,7 @@ impl SuperzetStore {
                 .enumerate()
                 .filter(|(_, workspace)| workspace.project_id == project_id)
                 .map(|(ix, _)| ix + 1)
-                .last()
+                .next_back()
                 .unwrap_or(self.state.workspaces.len());
             self.state.workspaces.insert(insert_ix, workspace);
         }
@@ -1113,7 +1113,7 @@ impl SuperzetStore {
                     | TaskStatus::Completed
                     | TaskStatus::Failed
             );
-            session.status = status.clone();
+            session.status = status;
             session.last_attention_reason = reason.clone();
             if finished {
                 session.exited_at = Some(Utc::now());

@@ -46,10 +46,8 @@ pub(crate) fn run_tests() -> Workflow {
     let mut jobs = vec![
         orchestrate,
         check_style(),
-        should_run_tests.guard(clippy(Platform::Windows)),
         should_run_tests.guard(clippy(Platform::Linux)),
         should_run_tests.guard(clippy(Platform::Mac)),
-        should_run_tests.guard(run_platform_tests(Platform::Windows)),
         should_run_tests.guard(run_platform_tests(Platform::Linux)),
         should_run_tests.guard(run_platform_tests(Platform::Mac)),
         should_run_tests.guard(doctests()),

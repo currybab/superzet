@@ -15,14 +15,14 @@ The main window is built around multiple local workspaces. Use the welcome page 
 
 ### 2. Learn the core shortcuts
 
-| Action | macOS |
-| --- | --- |
-| Command palette | `Cmd+Shift+P` |
-| Open file | `Cmd+P` |
-| Search symbols | `Ctrl+Shift+T` |
-| New terminal in center pane | `Cmd+T` |
-| Toggle terminal panel | `` Ctrl+` `` |
-| Open settings | `Cmd+,` |
+| Action                      | macOS          |
+| --------------------------- | -------------- |
+| Command palette             | `Cmd+Shift+P`  |
+| Open file                   | `Cmd+P`        |
+| Search symbols              | `Ctrl+Shift+T` |
+| New terminal in center pane | `Cmd+T`        |
+| Toggle terminal panel       | `` Ctrl+` ``   |
+| Open settings               | `Cmd+,`        |
 
 ### 3. Work from terminals first
 
