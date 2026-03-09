@@ -4,7 +4,6 @@ use serde::Deserialize;
 use std::{
     fs,
     path::{Component, Path, PathBuf},
-    process::Command,
 };
 use superzet_model::{
     GitChangeSummary, ProjectEntry, ProjectLocation, WorkspaceAttentionStatus, WorkspaceEntry,
@@ -145,7 +144,7 @@ pub fn create_workspace(
             id: Uuid::new_v4().to_string(),
             project_id: project.id.clone(),
             kind: WorkspaceKind::Worktree,
-            name: branch_name.clone(),
+            name: branch_name,
             display_name: None,
             branch: refresh.branch,
             location: WorkspaceLocation::Local { worktree_path },
@@ -258,13 +257,17 @@ fn run_git(repo_root: &Path, args: &[&str]) -> Result<()> {
     git_output(repo_root, args).map(|_| ())
 }
 
+fn run_command_output(
+    mut command: smol::process::Command,
+    failure_context: impl FnOnce() -> String,
+) -> Result<std::process::Output> {
+    smol::block_on(command.output()).with_context(failure_context)
+}
+
 fn git_output(repo_root: &Path, args: &[&str]) -> Result<String> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(repo_root)
-        .args(args)
-        .output()
-        .with_context(|| format!("failed to run git {}", args.join(" ")))?;
+    let mut command = smol::process::Command::new("git");
+    command.arg("-C").arg(repo_root).args(args);
+    let output = run_command_output(command, || format!("failed to run git {}", args.join(" ")))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -418,14 +421,16 @@ fn run_shell_command(
     workspace_name: &str,
     repo_root: &Path,
 ) -> Result<()> {
-    let output = Command::new("/bin/zsh")
+    let mut shell_command = smol::process::Command::new("/bin/zsh");
+    shell_command
         .arg("-lc")
         .arg(command)
         .current_dir(cwd)
         .env("SUPERSET_WORKSPACE_NAME", workspace_name)
-        .env("SUPERSET_ROOT_PATH", repo_root)
-        .output()
-        .with_context(|| format!("failed to run hook command: {command}"))?;
+        .env("SUPERSET_ROOT_PATH", repo_root);
+    let output = run_command_output(shell_command, || {
+        format!("failed to run hook command: {command}")
+    })?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -739,12 +744,9 @@ mod tests {
     }
 
     fn git(repo_path: &Path, args: &[&str]) {
-        let output = Command::new("git")
-            .arg("-C")
-            .arg(repo_path)
-            .args(args)
-            .output()
-            .unwrap();
+        let mut command = smol::process::Command::new("git");
+        command.arg("-C").arg(repo_path).args(args);
+        let output = smol::block_on(command.output()).unwrap();
 
         if !output.status.success() {
             panic!(

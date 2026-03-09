@@ -16816,6 +16816,7 @@ dependencies = [
  "log",
  "serde",
  "serde_json",
+ "smol",
  "superzet_model",
  "tempfile",
  "uuid",
