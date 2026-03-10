@@ -5184,6 +5184,7 @@ mod tests {
         }
     }
 
+    #[cfg(target_os = "macos")]
     fn assert_exact_key_bindings_for(
         window: AnyWindowHandle,
         cx: &TestAppContext,
