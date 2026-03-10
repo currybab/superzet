@@ -2158,6 +2158,15 @@ impl ProjectPanel {
             editor.clear(window, cx);
         });
         self.update_visible_entries(Some((worktree_id, NEW_ENTRY_ID)), true, true, window, cx);
+        cx.defer_in(window, |this, window, cx| {
+            if this.state.edit_state.is_none() {
+                return;
+            }
+
+            this.filename_editor.update(cx, |editor, cx| {
+                editor.focus_handle(cx).focus(window, cx);
+            });
+        });
         cx.notify();
     }
 

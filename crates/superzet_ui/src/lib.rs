@@ -305,6 +305,10 @@ impl TerminalLifecycleNotification {
 }
 
 pub fn init(cx: &mut App) {
+    if SuperzetStore::try_global(cx).is_none() {
+        return;
+    }
+
     let attention_controller = cx.new(WorkspaceAttentionController::new);
 
     cx.observe_new(
@@ -366,7 +370,9 @@ pub fn init(cx: &mut App) {
 }
 
 pub fn install_pane_accessory(pane: &Entity<Pane>, cx: &mut Context<Workspace>) {
-    let store = SuperzetStore::global(cx);
+    let Some(store) = SuperzetStore::try_global(cx) else {
+        return;
+    };
     let pane_handle = pane.clone();
     cx.observe(&store, move |_, _, cx| {
         let pane_handle = pane_handle.clone();
@@ -385,7 +391,7 @@ fn render_terminal_preset_bar(
     cx: &mut Context<Pane>,
 ) -> Option<AnyElement> {
     let workspace_handle = pane.workspace()?;
-    let store = SuperzetStore::global(cx);
+    let store = SuperzetStore::try_global(cx)?;
     let (workspace_entry, presets) = {
         let store = store.read(cx);
         let workspace_entry =

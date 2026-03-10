@@ -13340,10 +13340,10 @@ mod tests {
         let (workspace, _cx) =
             cx.add_window_view(|window, cx| Workspace::test_new(project.clone(), window, cx));
 
-        // Test with status bar shown (default)
+        // Superzet hides the status bar by default.
         workspace.read_with(cx, |workspace, cx| {
             let visible = workspace.status_bar_visible(cx);
-            assert!(visible, "Status bar should be visible by default");
+            assert!(!visible, "Status bar should be hidden by default");
         });
 
         // Test with status bar hidden

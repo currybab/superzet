@@ -400,6 +400,10 @@ pub fn initialize_workspace(app_state: Arc<AppState>, cx: &mut App) {
         cx.defer(move |cx| {
             window_handle
                 .update(cx, |_, window, cx| {
+                    if superzet_model::SuperzetStore::try_global(cx).is_none() {
+                        return;
+                    }
+
                     let sidebar = cx
                         .new(|cx| SuperzetSidebar::new(multi_workspace_handle.clone(), window, cx));
                     multi_workspace_handle.update(cx, |multi_workspace, cx| {
@@ -651,12 +655,19 @@ fn initialize_panels(window: &mut Window, cx: &mut Context<Workspace>) -> Task<a
                 debug_panel,
             )?;
 
-        let right_sidebar = SuperzetRightSidebar::load(
-            workspace_handle.clone(),
-            project_panel.clone(),
-            git_panel.clone(),
-            cx.clone(),
-        )?;
+        let right_sidebar = cx
+            .update(|_, cx| superzet_model::SuperzetStore::try_global(cx).is_some())
+            .ok()
+            .filter(|has_store| *has_store)
+            .map(|_| {
+                SuperzetRightSidebar::load(
+                    workspace_handle.clone(),
+                    project_panel.clone(),
+                    git_panel.clone(),
+                    cx.clone(),
+                )
+            })
+            .transpose()?;
 
         workspace_handle
             .update_in(cx, |workspace, window, cx| {
@@ -665,12 +676,15 @@ fn initialize_panels(window: &mut Window, cx: &mut Context<Workspace>) -> Task<a
                 workspace.add_panel(terminal_panel, window, cx);
                 workspace.add_panel(git_panel, window, cx);
                 workspace.add_panel(debug_panel, window, cx);
-                workspace.add_panel(right_sidebar, window, cx);
+                if let Some(right_sidebar) = right_sidebar {
+                    workspace.add_panel(right_sidebar, window, cx);
 
-                // Superzet owns the left shell and the right details sidebar.
-                // Zed's left/bottom docks add duplicate chrome for this product surface.
-                workspace.close_all_docks(window, cx);
-                let _ = workspace.focus_panel::<SuperzetRightSidebar>(window, cx);
+                    // Superzet owns the left shell and the right details sidebar.
+                    // Zed's left/bottom docks add duplicate chrome for this product surface.
+                    workspace.close_all_docks(window, cx);
+                    let _ = workspace.focus_panel::<SuperzetRightSidebar>(window, cx);
+                }
+
                 let active_pane = workspace.active_pane().clone();
                 active_pane.update(cx, |pane, cx| window.focus(&pane.focus_handle(cx), cx));
             })

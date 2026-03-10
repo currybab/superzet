@@ -24,8 +24,11 @@ const MAC_DEFAULT_NEXTEST_EXCLUDE_FILTER: &str = concat!(
     "package(agent_ui) | ",
     "package(collab) | ",
     "package(copilot) | ",
+    "package(debugger_ui) | ",
     "(package(editor) and test(edit_prediction_tests)) | ",
     "(package(project) and test(disable_ai_settings_tests)) | ",
+    "(package(project) and test(context_server_store)) | ",
+    "(package(superzet) and test(test_action_namespaces)) | ",
     "(package(workspace) and test(test_sidebar_disabled_when_disable_ai_is_enabled)) | ",
     "(package(superzet) and test(test_disable_ai_crash))"
 );
