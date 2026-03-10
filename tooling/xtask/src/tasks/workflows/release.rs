@@ -123,7 +123,7 @@ fn bundle_linux_remote_server_preview(arch: Arch) -> NamedJob {
               ;;
           esac
           zig_root="$(mktemp -d)"
-          curl -fsSL "https://ziglang.org/download/{zig_version}/zig-linux-${{zig_arch}}-{zig_version}.tar.xz" -o "${{zig_root}}/zig.tar.xz"
+          curl -fsSL "https://ziglang.org/download/{zig_version}/zig-${{zig_arch}}-linux-{zig_version}.tar.xz" -o "${{zig_root}}/zig.tar.xz"
           tar -xJf "${{zig_root}}/zig.tar.xz" -C "${{zig_root}}" --strip-components=1
           export PATH="${{zig_root}}:$PATH"
         fi

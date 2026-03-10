@@ -75,7 +75,7 @@ jobs:
               ;;
           esac
           zig_root="$(mktemp -d)"
-          curl -fsSL "https://ziglang.org/download/0.14.1/zig-linux-${zig_arch}-0.14.1.tar.xz" -o "${zig_root}/zig.tar.xz"
+          curl -fsSL "https://ziglang.org/download/0.14.1/zig-${zig_arch}-linux-0.14.1.tar.xz" -o "${zig_root}/zig.tar.xz"
           tar -xJf "${zig_root}/zig.tar.xz" -C "${zig_root}" --strip-components=1
           export PATH="${zig_root}:$PATH"
         fi
@@ -129,7 +129,7 @@ jobs:
               ;;
           esac
           zig_root="$(mktemp -d)"
-          curl -fsSL "https://ziglang.org/download/0.14.1/zig-linux-${zig_arch}-0.14.1.tar.xz" -o "${zig_root}/zig.tar.xz"
+          curl -fsSL "https://ziglang.org/download/0.14.1/zig-${zig_arch}-linux-0.14.1.tar.xz" -o "${zig_root}/zig.tar.xz"
           tar -xJf "${zig_root}/zig.tar.xz" -C "${zig_root}" --strip-components=1
           export PATH="${zig_root}:$PATH"
         fi
