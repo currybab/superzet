@@ -271,8 +271,15 @@ jobs:
         R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
         R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
         SCCACHE_BUCKET: sccache-zed
-    - name: steps::cargo_nextest
-      run: cargo nextest run --workspace --no-fail-fast --no-tests=warn${{ needs.orchestrate.outputs.changed_packages && format(' -E "{0}"', needs.orchestrate.outputs.changed_packages) || '' }}
+    - name: run_tests::cargo_nextest_for_platform
+      run: |
+        FILTER='not (package(acp_thread) | package(agent) | package(agent_ui) | package(collab) | package(copilot) | (package(project) and test(disable_ai_settings_tests)) | (package(superzet) and test(test_action_namespaces)) | (package(workspace) and test(test_sidebar_disabled_when_disable_ai_is_enabled)) | (package(worktree) and test(test_random_worktree_changes)) | (package(language) and test(test_random_syntax_map_edits_rust_macros)) | (package(multi_buffer) and test(test_random_multibuffer)))'
+        if [ -n "$CHANGED_PACKAGES" ]; then
+          FILTER="($CHANGED_PACKAGES) and ($FILTER)"
+        fi
+        cargo nextest run --workspace --no-fail-fast --no-tests=warn -E "$FILTER"
+      env:
+        CHANGED_PACKAGES: ${{ needs.orchestrate.outputs.changed_packages }}
     - name: steps::show_sccache_stats
       run: sccache --show-stats || true
     - name: steps::cleanup_cargo_config

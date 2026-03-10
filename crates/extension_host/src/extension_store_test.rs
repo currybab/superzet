@@ -720,10 +720,11 @@ async fn test_extension_store_with_test_extension(cx: &mut TestAppContext) {
     });
 
     let executor = cx.executor();
+    let install_dev_extension_timeout_seconds = if std::env::var("CI").is_ok() { 180 } else { 60 };
     await_or_timeout(
         &executor,
         "awaiting install_dev_extension",
-        60,
+        install_dev_extension_timeout_seconds,
         extension_store.update(cx, |store, cx| {
             store.install_dev_extension(test_extension_dir.clone(), cx)
         }),

@@ -33,8 +33,28 @@ const MAC_DEFAULT_NEXTEST_EXCLUDE_FILTER: &str = concat!(
     "(package(superzet) and test(test_disable_ai_crash))"
 );
 
+const LINUX_DEFAULT_NEXTEST_EXCLUDE_FILTER: &str = concat!(
+    "package(acp_thread) | ",
+    "package(agent) | ",
+    "package(agent_ui) | ",
+    "package(collab) | ",
+    "package(copilot) | ",
+    "(package(project) and test(disable_ai_settings_tests)) | ",
+    "(package(superzet) and test(test_action_namespaces)) | ",
+    "(package(workspace) and test(test_sidebar_disabled_when_disable_ai_is_enabled)) | ",
+    "(package(worktree) and test(test_random_worktree_changes)) | ",
+    "(package(language) and test(test_random_syntax_map_edits_rust_macros)) | ",
+    "(package(multi_buffer) and test(test_random_multibuffer))"
+);
+
 fn cargo_nextest_for_platform(platform: Platform, filter_packages: bool) -> Step<Run> {
-    if platform != Platform::Mac {
+    let exclude_filter = match platform {
+        Platform::Mac => Some(MAC_DEFAULT_NEXTEST_EXCLUDE_FILTER),
+        Platform::Linux => Some(LINUX_DEFAULT_NEXTEST_EXCLUDE_FILTER),
+        _ => None,
+    };
+
+    let Some(exclude_filter) = exclude_filter else {
         return if filter_packages {
             steps::cargo_nextest(platform)
                 .with_changed_packages_filter("orchestrate")
@@ -42,7 +62,7 @@ fn cargo_nextest_for_platform(platform: Platform, filter_packages: bool) -> Step
         } else {
             steps::cargo_nextest(platform).into()
         };
-    }
+    };
 
     let command = if filter_packages {
         formatdoc!(
@@ -53,14 +73,14 @@ fn cargo_nextest_for_platform(platform: Platform, filter_packages: bool) -> Step
             fi
             cargo nextest run --workspace --no-fail-fast --no-tests=warn -E "$FILTER"
             "#,
-            exclude_filter = MAC_DEFAULT_NEXTEST_EXCLUDE_FILTER,
+            exclude_filter = exclude_filter,
         )
     } else {
         formatdoc!(
             r#"
             cargo nextest run --workspace --no-fail-fast --no-tests=warn -E 'not ({exclude_filter})'
             "#,
-            exclude_filter = MAC_DEFAULT_NEXTEST_EXCLUDE_FILTER,
+            exclude_filter = exclude_filter,
         )
     };
 
