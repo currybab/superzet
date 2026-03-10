@@ -112,9 +112,16 @@ fn bundle_linux_remote_server_preview(arch: Arch) -> NamedJob {
     };
     let build_script = formatdoc!(
         r#"
+        if ! command -v zig >/dev/null 2>&1; then
+          sudo apt-get update
+          sudo apt-get install -y zig
+        fi
+        if ! command -v cargo-zigbuild >/dev/null 2>&1; then
+          cargo install --locked cargo-zigbuild
+        fi
         rustup target add "{remote_server_triple}"
         export RUSTFLAGS="${{RUSTFLAGS:-}} -C target-feature=+crt-static"
-        cargo build --release --target "{remote_server_triple}" --package remote_server
+        cargo zigbuild --release --target "{remote_server_triple}" --package remote_server
         objcopy --strip-debug "target/{remote_server_triple}/release/remote_server"
         gzip -f --stdout --best "target/{remote_server_triple}/release/remote_server" > "target/{artifact_name}"
         "#,

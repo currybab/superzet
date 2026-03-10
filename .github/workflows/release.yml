@@ -65,9 +65,16 @@ jobs:
       run: ./script/download-wasi-sdk
     - name: release::bundle_linux_remote_server_preview
       run: |
+        if ! command -v zig >/dev/null 2>&1; then
+          sudo apt-get update
+          sudo apt-get install -y zig
+        fi
+        if ! command -v cargo-zigbuild >/dev/null 2>&1; then
+          cargo install --locked cargo-zigbuild
+        fi
         rustup target add "x86_64-unknown-linux-musl"
         export RUSTFLAGS="${RUSTFLAGS:-} -C target-feature=+crt-static"
-        cargo build --release --target "x86_64-unknown-linux-musl" --package remote_server
+        cargo zigbuild --release --target "x86_64-unknown-linux-musl" --package remote_server
         objcopy --strip-debug "target/x86_64-unknown-linux-musl/release/remote_server"
         gzip -f --stdout --best "target/x86_64-unknown-linux-musl/release/remote_server" > "target/superzet-remote-server-linux-x86_64.gz"
     - name: '@actions/upload-artifact superzet-remote-server-linux-x86_64.gz'
@@ -102,9 +109,16 @@ jobs:
       run: ./script/download-wasi-sdk
     - name: release::bundle_linux_remote_server_preview
       run: |
+        if ! command -v zig >/dev/null 2>&1; then
+          sudo apt-get update
+          sudo apt-get install -y zig
+        fi
+        if ! command -v cargo-zigbuild >/dev/null 2>&1; then
+          cargo install --locked cargo-zigbuild
+        fi
         rustup target add "aarch64-unknown-linux-musl"
         export RUSTFLAGS="${RUSTFLAGS:-} -C target-feature=+crt-static"
-        cargo build --release --target "aarch64-unknown-linux-musl" --package remote_server
+        cargo zigbuild --release --target "aarch64-unknown-linux-musl" --package remote_server
         objcopy --strip-debug "target/aarch64-unknown-linux-musl/release/remote_server"
         gzip -f --stdout --best "target/aarch64-unknown-linux-musl/release/remote_server" > "target/superzet-remote-server-linux-aarch64.gz"
     - name: '@actions/upload-artifact superzet-remote-server-linux-aarch64.gz'
