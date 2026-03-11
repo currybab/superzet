@@ -168,6 +168,54 @@ async fn test_opening_file(cx: &mut gpui::TestAppContext) {
 }
 
 #[gpui::test]
+async fn test_copy_relative_path_copies_marked_entries(cx: &mut gpui::TestAppContext) {
+    init_test_with_editor(cx);
+
+    let fs = FakeFs::new(cx.executor());
+    fs.insert_tree(
+        path!("/root"),
+        json!({
+            "dir": {
+                "file_a.txt": "",
+                "file_b.txt": "",
+            }
+        }),
+    )
+    .await;
+
+    let project = Project::test(fs.clone(), [path!("/root").as_ref()], cx).await;
+    let window = cx.add_window(|window, cx| MultiWorkspace::test_new(project.clone(), window, cx));
+    let workspace = window
+        .read_with(cx, |mw, _| mw.workspace().clone())
+        .unwrap();
+    let cx = &mut VisualTestContext::from_window(window.into(), cx);
+    let panel = workspace.update_in(cx, ProjectPanel::new);
+    cx.run_until_parked();
+
+    toggle_expand_dir(&panel, "root/dir", cx);
+    select_path_with_mark(&panel, "root/dir/file_a.txt", cx);
+    select_path_with_mark(&panel, "root/dir/file_b.txt", cx);
+
+    panel.update_in(cx, |panel, window, cx| {
+        panel.copy_relative_path(&zed_actions::workspace::CopyRelativePath, window, cx);
+    });
+
+    let mut copied_paths = cx
+        .read_from_clipboard()
+        .and_then(|item| item.text())
+        .expect("clipboard should contain copied paths")
+        .lines()
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    copied_paths.sort();
+
+    assert_eq!(
+        copied_paths,
+        vec!["dir/file_a.txt".to_string(), "dir/file_b.txt".to_string()]
+    );
+}
+
+#[gpui::test]
 async fn test_exclusions_in_visible_list(cx: &mut gpui::TestAppContext) {
     init_test(cx);
     cx.update(|cx| {

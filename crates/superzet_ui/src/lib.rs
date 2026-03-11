@@ -1522,7 +1522,6 @@ impl SuperzetSidebar {
             .into_iter()
             .map(|workspace| {
                 let git_store = workspace.read(cx).project().read(cx).git_store().clone();
-                let workspace = workspace.clone();
 
                 cx.subscribe(&git_store, move |this, _, event, cx| {
                     let persist = match event {

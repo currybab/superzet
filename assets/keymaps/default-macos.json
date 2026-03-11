@@ -175,6 +175,7 @@
       "cmd-e": ["buffer_search::Deploy", { "focus": false }],
       "cmd->": "agent::AddSelectionToThread",
       "cmd-<": "assistant::InsertIntoEditor",
+      "cmd-shift-c": "editor::CopyFileLocation",
       "cmd-alt-e": "editor::SelectEnclosingSymbol",
       "alt-enter": "editor::OpenSelectionsInMultibuffer",
     },
@@ -875,8 +876,6 @@
     "use_key_equivalents": true,
     "bindings": {
       "ctrl-alt-cmd-f": "workspace::FollowNextCollaborator",
-      // TODO: Move this to a dock open action
-      "cmd-shift-c": "collab_panel::ToggleFocus",
       // Only available in debug builds: opens an element inspector for development.
       "cmd-alt-i": "dev::ToggleInspector",
     },
@@ -931,6 +930,7 @@
       "escape": "menu::Cancel",
       "left": "outline_panel::CollapseSelectedEntry",
       "right": "outline_panel::ExpandSelectedEntry",
+      "cmd-shift-c": "workspace::CopyRelativePath",
       "cmd-alt-c": "workspace::CopyPath",
       "alt-cmd-shift-c": "workspace::CopyRelativePath",
       "alt-cmd-r": "outline_panel::RevealInFileManager",
@@ -954,6 +954,7 @@
       "cmd-x": "project_panel::Cut",
       "cmd-c": "project_panel::Copy",
       "cmd-v": "project_panel::Paste",
+      "cmd-shift-c": "workspace::CopyRelativePath",
       "cmd-alt-c": "workspace::CopyPath",
       "alt-cmd-shift-c": "workspace::CopyRelativePath",
       "enter": "project_panel::Rename",

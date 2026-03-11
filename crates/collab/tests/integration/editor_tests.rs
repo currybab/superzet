@@ -4707,7 +4707,7 @@ async fn test_copy_file_location(cx_a: &mut TestAppContext, cx_b: &mut TestAppCo
 
     assert_eq!(
         cx_a.read_from_clipboard().and_then(|item| item.text()),
-        Some(format!("{}:2", path!("src/main.rs")))
+        Some(path!("src/main.rs").to_string())
     );
 
     editor_b.update_in(cx_b, |editor, window, cx| {
@@ -4719,7 +4719,7 @@ async fn test_copy_file_location(cx_a: &mut TestAppContext, cx_b: &mut TestAppCo
 
     assert_eq!(
         cx_b.read_from_clipboard().and_then(|item| item.text()),
-        Some(format!("{}:2", path!("src/main.rs")))
+        Some(path!("src/main.rs").to_string())
     );
 }
 

@@ -8225,6 +8225,152 @@ async fn test_clipboard_line_numbers_from_multibuffer(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+async fn test_copy_file_location_without_selection_copies_path_only(cx: &mut TestAppContext) {
+    init_test(cx, |_| {});
+
+    let mut cx = EditorTestContext::new(cx).await;
+    cx.set_state(indoc! {"
+        alpha
+        beˇta
+        gamma
+    "});
+    cx.update_editor(|editor, window, cx| {
+        editor.copy_file_location(&CopyFileLocation, window, cx);
+    });
+
+    assert_eq!(
+        cx.read_from_clipboard().and_then(|item| item.text()),
+        Some("file".to_string())
+    );
+}
+
+#[gpui::test]
+async fn test_copy_file_location_with_selection_copies_line_numbers(cx: &mut TestAppContext) {
+    init_test(cx, |_| {});
+
+    let mut cx = EditorTestContext::new(cx).await;
+    cx.set_state(indoc! {"
+        alpha
+        «betaˇ»
+        gamma
+    "});
+    cx.update_editor(|editor, window, cx| {
+        editor.copy_file_location(&CopyFileLocation, window, cx);
+    });
+
+    assert_eq!(
+        cx.read_from_clipboard().and_then(|item| item.text()),
+        Some("file:2".to_string())
+    );
+}
+
+#[gpui::test]
+async fn test_copy_file_location_with_multiline_selection_copies_line_range(
+    cx: &mut TestAppContext,
+) {
+    init_test(cx, |_| {});
+
+    let mut cx = EditorTestContext::new(cx).await;
+    cx.set_state(indoc! {"
+        alpha
+        «beta
+        gamma
+        ˇ»delta
+    "});
+    cx.update_editor(|editor, window, cx| {
+        editor.copy_file_location(&CopyFileLocation, window, cx);
+    });
+
+    assert_eq!(
+        cx.read_from_clipboard().and_then(|item| item.text()),
+        Some("file:2-3".to_string())
+    );
+}
+
+#[gpui::test]
+async fn test_copy_file_location_uses_newest_selection(cx: &mut TestAppContext) {
+    init_test(cx, |_| {});
+
+    let mut cx = EditorTestContext::new(cx).await;
+    cx.set_state(indoc! {"
+        alpha
+        «betaˇ»
+        «gammaˇ»
+    "});
+    cx.update_editor(|editor, window, cx| {
+        editor.copy_file_location(&CopyFileLocation, window, cx);
+    });
+
+    assert_eq!(
+        cx.read_from_clipboard().and_then(|item| item.text()),
+        Some("file:3".to_string())
+    );
+}
+
+#[gpui::test]
+async fn test_copy_file_location_falls_back_to_path_for_multiple_excerpts(cx: &mut TestAppContext) {
+    init_test(cx, |_| {});
+
+    let fs = FakeFs::new(cx.executor());
+    fs.insert_tree(
+        path!("/root"),
+        json!({
+            "file_a.txt": "first line\nsecond line\n",
+            "file_b.txt": "third line\nfourth line\n",
+        }),
+    )
+    .await;
+
+    let project = Project::test(fs, [path!("/root").as_ref()], cx).await;
+
+    let buffer_a = project
+        .update(cx, |project, cx| {
+            project.open_local_buffer(path!("/root/file_a.txt"), cx)
+        })
+        .await
+        .unwrap();
+    let buffer_b = project
+        .update(cx, |project, cx| {
+            project.open_local_buffer(path!("/root/file_b.txt"), cx)
+        })
+        .await
+        .unwrap();
+
+    let multibuffer = cx.new(|cx| {
+        let mut multibuffer = MultiBuffer::new(ReadWrite);
+        multibuffer.set_excerpts_for_path(
+            PathKey::sorted(0),
+            buffer_a,
+            [Point::new(0, 0)..Point::new(2, 0)],
+            0,
+            cx,
+        );
+        multibuffer.set_excerpts_for_path(
+            PathKey::sorted(1),
+            buffer_b,
+            [Point::new(0, 0)..Point::new(2, 0)],
+            0,
+            cx,
+        );
+        multibuffer
+    });
+
+    let (editor, cx) = cx.add_window_view(|window, cx| {
+        build_editor_with_project(project.clone(), multibuffer, window, cx)
+    });
+
+    editor.update_in(cx, |editor, window, cx| {
+        editor.select_all(&SelectAll, window, cx);
+        editor.copy_file_location(&CopyFileLocation, window, cx);
+    });
+
+    assert_eq!(
+        cx.read_from_clipboard().and_then(|item| item.text()),
+        Some("file_b.txt".to_string())
+    );
+}
+
+#[gpui::test]
 async fn test_paste_multiline(cx: &mut TestAppContext) {
     init_test(cx, |_| {});
 

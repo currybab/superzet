@@ -22832,16 +22832,22 @@ impl Editor {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(path) = self.active_excerpt(cx).and_then(|(_, buffer, _)| {
-            let project = self.project()?.read(cx);
-            let path = buffer.read(cx).file()?.path();
-            let path = path.display(project.path_style(cx));
-            Some(path)
-        }) {
-            cx.write_to_clipboard(ClipboardItem::new_string(path.to_string()));
+        if let Some(path) = self.active_relative_path(cx) {
+            cx.write_to_clipboard(ClipboardItem::new_string(path));
         } else {
             cx.propagate();
         }
+    }
+
+    fn active_relative_path(&self, cx: &App) -> Option<String> {
+        self.active_excerpt(cx)
+            .and_then(|(_, buffer, _)| self.relative_path_for_buffer(&buffer, cx))
+    }
+
+    fn relative_path_for_buffer(&self, buffer: &Entity<Buffer>, cx: &App) -> Option<String> {
+        let project = self.project()?.read(cx);
+        let path = buffer.read(cx).file()?.path();
+        Some(path.display(project.path_style(cx)).to_string())
     }
 
     /// Returns the project path for the editor's buffer, if any buffer is
@@ -23233,21 +23239,46 @@ impl Editor {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let selection = self
-            .selections
-            .newest::<Point>(&self.display_snapshot(cx))
-            .start
-            .row
-            + 1;
-        if let Some(file_location) = self.active_excerpt(cx).and_then(|(_, buffer, _)| {
-            let project = self.project()?.read(cx);
-            let file = buffer.read(cx).file()?;
-            let path = file.path().display(project.path_style(cx));
-
-            Some(format!("{path}:{selection}"))
-        }) {
+        if let Some(file_location) = self.selection_file_location(cx) {
             cx.write_to_clipboard(ClipboardItem::new_string(file_location));
         }
+    }
+
+    fn selection_file_location(&self, cx: &mut App) -> Option<String> {
+        let selection = self.selections.newest::<Point>(&self.display_snapshot(cx));
+        if selection.is_empty() {
+            return self.active_relative_path(cx);
+        }
+
+        let multi_buffer = self.buffer().read(cx);
+        let multi_buffer_snapshot = multi_buffer.snapshot(cx);
+        let buffer_ranges = multi_buffer_snapshot
+            .range_to_buffer_ranges(selection.range().start..=selection.range().end);
+        let [(buffer_snapshot, buffer_range, _)] = buffer_ranges.as_slice() else {
+            return self.active_relative_path(cx);
+        };
+
+        let Some(buffer) = multi_buffer.buffer(buffer_snapshot.remote_id()) else {
+            return self.active_relative_path(cx);
+        };
+        let Some(relative_path) = self.relative_path_for_buffer(&buffer, cx) else {
+            return self.active_relative_path(cx);
+        };
+
+        let start_point = buffer_snapshot.offset_to_point(buffer_range.start.0);
+        let end_point = buffer_snapshot.offset_to_point(buffer_range.end.0);
+        let start_line = start_point.row + 1;
+        let mut end_line = end_point.row + 1;
+
+        if end_point.column == 0 && end_point.row > start_point.row {
+            end_line -= 1;
+        }
+
+        Some(if start_line == end_line {
+            format!("{relative_path}:{start_line}")
+        } else {
+            format!("{relative_path}:{start_line}-{end_line}")
+        })
     }
 
     pub fn open_permalink_to_line(
