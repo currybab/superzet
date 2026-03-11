@@ -34,7 +34,9 @@ use notifications::status_toast::{StatusToast, ToastIcon};
 use project::{
     Entry, EntryKind, Fs, GitEntry, GitEntryRef, GitTraversal, Project, ProjectEntryId,
     ProjectPath, Worktree, WorktreeId,
-    git_store::{GitStoreEvent, RepositoryEvent, git_traversal::ChildEntriesGitIter},
+    git_store::{
+        GitStoreEvent, RepositoryEvent, RepositorySnapshot, git_traversal::ChildEntriesGitIter,
+    },
     project_settings::GoToDiagnosticSeverityFilter,
 };
 use project_panel_settings::ProjectPanelSettings;
@@ -51,7 +53,7 @@ use std::{any::TypeId, time::Instant};
 use std::{
     cell::OnceCell,
     cmp,
-    collections::HashSet,
+    collections::{BTreeMap, HashSet},
     ops::Range,
     path::{Path, PathBuf},
     sync::Arc,
@@ -124,6 +126,34 @@ impl State {
             expanded_dir_ids: old.expanded_dir_ids.clone(),
         }
     }
+}
+
+fn repo_snapshot_for_path<'a>(
+    repo_root_to_snapshot: &BTreeMap<&'a Path, &'a RepositorySnapshot>,
+    path: &Path,
+) -> Option<(&'a RepositorySnapshot, git::repository::RepoPath)> {
+    for query in path.ancestors() {
+        let (_, snapshot) = repo_root_to_snapshot.range(Path::new("")..=query).last()?;
+        if let Some(repo_path) = snapshot.abs_path_to_repo_path(path) {
+            return Some((*snapshot, repo_path));
+        }
+    }
+
+    None
+}
+
+fn git_summary_for_entry(
+    repo_root_to_snapshot: &BTreeMap<&Path, &RepositorySnapshot>,
+    worktree_snapshot: &worktree::Snapshot,
+    entry: &Entry,
+) -> GitSummary {
+    let abs_path = worktree_snapshot.absolutize(&entry.path);
+    let Some((repo_snapshot, repo_path)) = repo_snapshot_for_path(repo_root_to_snapshot, &abs_path)
+    else {
+        return GitSummary::UNCHANGED;
+    };
+
+    repo_snapshot.status_summary_for_path(&repo_path, entry.is_dir())
 }
 
 pub struct ProjectPanel {
@@ -659,9 +689,11 @@ impl ProjectPanel {
                 &git_store,
                 window,
                 |this, _, event, window, cx| match event {
-                    GitStoreEvent::RepositoryUpdated(_, RepositoryEvent::StatusesChanged, _)
-                    | GitStoreEvent::RepositoryAdded
-                    | GitStoreEvent::RepositoryRemoved(_) => {
+                    GitStoreEvent::RepositoryUpdated(_, RepositoryEvent::StatusesChanged, _) => {
+                        this.refresh_visible_git_summaries(cx);
+                        cx.notify();
+                    }
+                    GitStoreEvent::RepositoryAdded | GitStoreEvent::RepositoryRemoved(_) => {
                         this.update_visible_entries(None, false, false, window, cx);
                         cx.notify();
                     }
@@ -3879,6 +3911,42 @@ impl ProjectPanel {
                 is_fifo: parent_entry.is_fifo,
             },
             git_summary,
+        }
+    }
+
+    fn refresh_visible_git_summaries(&mut self, cx: &mut Context<Self>) {
+        if self.state.visible_entries.is_empty() {
+            return;
+        }
+
+        let project = self.project.read(cx);
+        let repo_snapshots = project.git_store().read(cx).repo_snapshots(cx);
+        let repo_root_to_snapshot = repo_snapshots
+            .values()
+            .map(|snapshot| (&*snapshot.work_directory_abs_path, snapshot))
+            .collect::<BTreeMap<_, _>>();
+        let worktree_snapshots = project
+            .visible_worktrees(cx)
+            .map(|worktree| {
+                let snapshot = worktree.read(cx).snapshot();
+                (snapshot.id(), snapshot)
+            })
+            .collect::<HashMap<_, _>>();
+
+        for visible_worktree in &mut self.state.visible_entries {
+            let Some(worktree_snapshot) = worktree_snapshots.get(&visible_worktree.worktree_id)
+            else {
+                continue;
+            };
+
+            for entry in &mut visible_worktree.entries {
+                if entry.id == NEW_ENTRY_ID {
+                    continue;
+                }
+
+                entry.git_summary =
+                    git_summary_for_entry(&repo_root_to_snapshot, worktree_snapshot, &entry.entry);
+            }
         }
     }
 

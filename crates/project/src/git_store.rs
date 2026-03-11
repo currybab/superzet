@@ -3680,6 +3680,18 @@ impl RepositorySnapshot {
         self.statuses_by_path.summary().item_summary
     }
 
+    pub fn status_summary_for_path(&self, path: &RepoPath, is_dir: bool) -> GitSummary {
+        if is_dir {
+            let mut statuses = self.statuses_by_path.cursor::<PathProgress>(());
+            statuses.seek_forward(&PathTarget::Path(path), Bias::Left);
+            statuses.summary(&PathTarget::Successor(path), Bias::Left)
+        } else {
+            self.status_for_path(path)
+                .map(|status| status.status.into())
+                .unwrap_or(GitSummary::UNCHANGED)
+        }
+    }
+
     pub fn status_for_path(&self, path: &RepoPath) -> Option<StatusEntry> {
         self.statuses_by_path
             .get(&PathKey(path.as_ref().clone()), ())

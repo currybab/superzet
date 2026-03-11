@@ -1,6 +1,7 @@
 use super::*;
 use collections::HashSet;
 use editor::MultiBufferOffset;
+use git::status::StatusCode;
 use gpui::{Empty, Entity, TestAppContext, VisualTestContext};
 use menu::Cancel;
 use pretty_assertions::assert_eq;
@@ -3195,6 +3196,68 @@ async fn test_select_git_entry(cx: &mut gpui::TestAppContext) {
             "          modified2.txt",
             "          unmodified1.txt",
         ],
+    );
+}
+
+#[gpui::test]
+async fn test_git_status_updates_collapsed_directory_summary(cx: &mut gpui::TestAppContext) {
+    init_test_with_editor(cx);
+
+    let fs = FakeFs::new(cx.executor());
+    fs.insert_tree(
+        path!("/root"),
+        json!({
+            "repo": {
+                ".git": {},
+                "dir": {
+                    "tracked.txt": "1",
+                },
+                "other.txt": "1",
+            }
+        }),
+    )
+    .await;
+
+    fs.set_status_for_repo(path!("/root/repo/.git").as_ref(), &[]);
+
+    let project = Project::test(fs.clone(), [path!("/root/repo").as_ref()], cx).await;
+    project
+        .update(cx, |project, cx| project.git_scans_complete(cx))
+        .await;
+    cx.run_until_parked();
+
+    let window = cx.add_window(|window, cx| MultiWorkspace::test_new(project.clone(), window, cx));
+    let workspace = window
+        .read_with(cx, |mw, _| mw.workspace().clone())
+        .unwrap();
+    let cx = &mut VisualTestContext::from_window(window.into(), cx);
+    let panel = workspace.update_in(cx, ProjectPanel::new);
+    cx.run_until_parked();
+
+    let dir_entry_id = project.read_with(cx, |project, cx| {
+        let worktree = project.worktrees(cx).next().unwrap();
+        worktree
+            .read(cx)
+            .entry_for_path(rel_path("dir"))
+            .unwrap()
+            .id
+    });
+
+    assert!(!panel.read_with(cx, |panel, _| panel.has_git_changes(dir_entry_id)));
+
+    fs.set_status_for_repo(
+        path!("/root/repo/.git").as_ref(),
+        &[("dir/tracked.txt", StatusCode::Modified.worktree())],
+    );
+    project
+        .update(cx, |project, cx| project.git_scans_complete(cx))
+        .await;
+    cx.run_until_parked();
+
+    assert!(panel.read_with(cx, |panel, _| panel.has_git_changes(dir_entry_id)));
+    assert_eq!(
+        visible_entries_as_strings(&panel, 0..4, cx),
+        &["v repo", "    > .git", "    > dir", "      other.txt",],
     );
 }
 
