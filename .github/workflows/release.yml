@@ -39,7 +39,7 @@ jobs:
         name: superzet-aarch64.dmg
         path: target/aarch64-apple-darwin/release/superzet-aarch64.dmg
         if-no-files-found: error
-    timeout-minutes: 90
+    timeout-minutes: 360
   bundle_linux_remote_server_preview_x86_64:
     if: github.repository_owner == 'currybab'
     runs-on: ubuntu-24.04
