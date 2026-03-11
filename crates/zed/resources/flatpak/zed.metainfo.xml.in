@@ -11,12 +11,12 @@
     </developer>
     <description>
         <p>
-            superzet combines a workspace shell for coding agents with Zed's native editor, terminal, and diff engine.
+            Superzet combines a workspace shell for coding agents with an integrated editor, terminal, and diff workflow.
         </p>
         <p>Features:</p>
         <ul>
             <li>Projects and workspaces: Manage local repositories and git worktrees from one place.</li>
-            <li>Native editor and terminal: Reuse Zed's pane, terminal, and diff workflow in a task-oriented shell.</li>
+            <li>Native editor and terminal: Keep code, terminal tabs, and diffs in one task-oriented shell.</li>
             <li>Review loop: Keep changes, files, and terminal context visible without leaving the app.</li>
             <li>Local-first: Run your own CLI agents like Codex or Claude Code inside regular terminal tabs.</li>
         </ul>
