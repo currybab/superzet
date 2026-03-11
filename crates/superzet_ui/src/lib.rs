@@ -47,7 +47,6 @@ actions!(
         RevealChanges,
         OpenWorkspaceInNewWindow,
         DeleteWorkspace,
-        ToggleRightSidebar,
         CollapseWorkspaceSection,
         ExpandWorkspaceSection
     ]
@@ -356,13 +355,6 @@ pub fn init(cx: &mut App) {
                 })
                 .register_action(|workspace, _: &DeleteWorkspace, window, cx| {
                     run_delete_workspace(workspace, window, cx);
-                })
-                .register_action(|workspace, _: &ToggleRightSidebar, window, cx| {
-                    if workspace.right_dock().read(cx).is_open() {
-                        workspace.close_panel::<SuperzetRightSidebar>(window, cx);
-                    } else {
-                        workspace.open_panel::<SuperzetRightSidebar>(window, cx);
-                    }
                 });
         },
     )
@@ -2694,7 +2686,7 @@ impl Panel for SuperzetRightSidebar {
     }
 
     fn toggle_action(&self) -> Box<dyn gpui::Action> {
-        Box::new(ToggleRightSidebar)
+        Box::new(workspace::ToggleRightDock)
     }
 
     fn starts_open(&self, _: &gpui::Window, _: &App) -> bool {

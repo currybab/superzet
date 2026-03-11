@@ -39,7 +39,7 @@ pub fn app_menus(cx: &mut App) -> Vec<Menu> {
         }),
         MenuItem::separator(),
         MenuItem::action("Workspace Sidebar", workspace::ToggleWorkspaceSidebar),
-        MenuItem::action("Workspace Details", superzet_ui::ToggleRightSidebar),
+        MenuItem::action("Workspace Details", workspace::ToggleRightDock),
         MenuItem::action("Reveal Changes", superzet_ui::RevealChanges),
         MenuItem::separator(),
         MenuItem::action("Diagnostics", diagnostics::Deploy),

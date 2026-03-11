@@ -39,7 +39,6 @@ use settings::Settings;
 use settings::WorktreeId;
 use std::sync::Arc;
 use superzet_model::SuperzetStore;
-use superzet_ui;
 use theme::ActiveTheme;
 use title_bar_settings::TitleBarSettings;
 #[cfg(feature = "calls")]
@@ -51,7 +50,7 @@ use ui::{
 use update_version::UpdateVersion;
 use util::ResultExt;
 use workspace::{
-    MultiWorkspace, ToggleWorkspaceSidebar, ToggleWorktreeSecurity, Workspace,
+    MultiWorkspace, ToggleRightDock, ToggleWorkspaceSidebar, ToggleWorktreeSecurity, Workspace,
     notifications::NotifyResultExt,
 };
 use zed_actions::OpenRemote;
@@ -412,29 +411,23 @@ impl TitleBar {
                         IconButton::new("superzet-header-toggle-details", details_sidebar_icon)
                             .shape(ui::IconButtonShape::Square)
                             .icon_size(IconSize::Small)
-                            .tooltip(move |window, cx| {
+                            .tooltip(move |_window, cx| {
                                 if is_details_sidebar_open {
-                                    Tooltip::text("Hide details sidebar")(window, cx)
+                                    Tooltip::for_action(
+                                        "Hide details sidebar",
+                                        &ToggleRightDock,
+                                        cx,
+                                    )
                                 } else {
-                                    Tooltip::text("Show details sidebar")(window, cx)
+                                    Tooltip::for_action(
+                                        "Show details sidebar",
+                                        &ToggleRightDock,
+                                        cx,
+                                    )
                                 }
                             })
                             .on_click(move |_, window, cx| {
-                                if let Some(workspace) = workspace.upgrade() {
-                                    workspace.update(cx, |workspace, cx| {
-                                        if workspace.right_dock().read(cx).is_open() {
-                                            workspace
-                                                .close_panel::<superzet_ui::SuperzetRightSidebar>(
-                                                    window, cx,
-                                                );
-                                        } else {
-                                            workspace
-                                                .open_panel::<superzet_ui::SuperzetRightSidebar>(
-                                                    window, cx,
-                                                );
-                                        }
-                                    });
-                                }
+                                window.dispatch_action(Box::new(ToggleRightDock), cx);
                             }),
                     ),
             )
