@@ -13,6 +13,7 @@ jobs:
     if: github.repository_owner == 'currybab'
     runs-on: macos-latest
     env:
+      CARGO_TARGET_DIR: target
       SUPERZET_RELEASE_CHANNEL: preview
       SUPERZET_MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
       SUPERZET_MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}

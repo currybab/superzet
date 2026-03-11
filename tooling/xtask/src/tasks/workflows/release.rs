@@ -69,6 +69,7 @@ fn bundle_mac_preview() -> NamedJob {
             .with_repository_owner_guard()
             .runs_on(runners::MAC_DEFAULT)
             .timeout_minutes(360u32)
+            .add_env(("CARGO_TARGET_DIR", "target"))
             .add_env(("SUPERZET_RELEASE_CHANNEL", "preview"))
             .add_env(("SUPERZET_MACOS_CERTIFICATE", vars::MACOS_CERTIFICATE))
             .add_env((
