@@ -17,30 +17,38 @@ Current focus:
 - local repositories and git worktrees
 - native editor, split panes, and diff views
 - terminal-first use of external coding agents
-- macOS public preview releases
+- public macOS Apple Silicon releases
 
 Deliberately out of scope for the default build:
 
 - cloud collaboration
 - calls / WebRTC
 - hosted AI surfaces from upstream Zed
-- remote-server distribution as part of the public release flow
+- Zed's own agent panel and text-thread product surface
 
 ## Roadmap
 
 Now:
 
-- stabilize the local-first workspace shell and public macOS release
-- keep docs, branding, and release infrastructure aligned with `superzet`
+- stabilize the local-first workspace shell
+- keep release, update, and docs surfaces aligned with `superzet`
 
 Next:
 
-- center-pane ACP agent tabs built on the existing upstream agent UI stack
-- a repeatable intake lane for ACP and agent UI improvements from upstream Zed
+- center-pane tabs for external ACP agents using selected pieces of the existing ACP / `agent_ui` stack, without reviving Zed's own agent panel
+- next-edit integration
 
 Later:
 
-- lighter maintainer workflows for CI, docs, and release operations
+- workspace shell polish across startup, empty states, and worktree flows
+- smoother terminal and agent handoff across presets, diffs, and tabs
+
+Not planned:
+
+- cloud collaboration and calls / WebRTC
+- hosted AI surfaces in the default build
+- Zed's own agent panel and text-thread product surface
+- public Windows or Linux desktop releases
 
 ## Build From Source
 
@@ -50,16 +58,22 @@ cd superzet
 cargo run -p superzet
 ```
 
-The default app build is the lightweight single-user shell flavor:
+For day-to-day development, stay on the default lightweight shell:
 
 ```bash
-cargo build -p superzet
+cargo check -p superzet
 ```
 
-If you need the upstream-like AI and collab stack again:
+Before cutting a release, run the local maintainer preflight:
 
 ```bash
-cargo build -p superzet --features full
+./script/check-local-ci
+```
+
+Only use the inherited upstream surface when you are explicitly debugging it:
+
+```bash
+cargo check -p superzet --features full
 ```
 
 For a signed macOS bundle:
@@ -68,18 +82,18 @@ For a signed macOS bundle:
 ./script/bundle-mac aarch64-apple-darwin
 ```
 
-## Public Preview Release
+## Public Release
 
-The public test release flow is macOS preview only.
+The current public desktop release flow is macOS Apple Silicon only.
 
-- Tag preview releases as `vX.Y.Z-pre`
+- Tag releases as `vX.Y.Z`
 - GitHub Actions builds `superzet-aarch64.dmg`
-- The workflow uploads the DMG and `sha256sums.txt` to GitHub Releases
+- The release workflow also uploads Linux `remote_server` support assets
 - `releases.nangman.ai/releases/...` is served by a thin Cloudflare worker that points the app at those GitHub assets
 
 ## Release Infrastructure
 
-To publish preview builds with in-app updates, you need:
+To publish a release with in-app updates, you need:
 
 - GitHub Releases enabled for this repository
 - Cloudflare configured for `nangman.ai` with a `releases.nangman.ai/releases*` route
@@ -99,13 +113,15 @@ The app prefers `SUPERZET_*` runtime env vars for release/update overrides, but 
 
 - Extensions still use the upstream Zed marketplace.
 - Much of the editor and platform code still comes from upstream Zed and is intentionally kept close for easier maintenance.
-- Public docs and release surfaces are being rewritten around `superzet`, but not every inherited upstream page has been reworked yet.
+- The ACP roadmap is about external ACP agent tabs only. It does not mean bringing back Zed's own agent product surface.
 
 ## Project Docs
 
+- [Getting Started](./docs/src/getting-started.md)
+- [Installation](./docs/src/installation.md)
+- [Development](./docs/src/development.md)
 - [Contributing](./CONTRIBUTING.md)
 - [Security](./SECURITY.md)
-- [Docs](./docs/src/SUMMARY.md)
 
 ## License
 

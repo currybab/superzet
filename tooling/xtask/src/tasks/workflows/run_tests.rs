@@ -10,7 +10,7 @@ use crate::tasks::workflows::{
         CommonJobConditions, cache_rust_dependencies_namespace, repository_owner_guard_expression,
         use_clang,
     },
-    vars::{self, PathCondition},
+    vars::PathCondition,
 };
 
 use super::{
@@ -118,24 +118,16 @@ pub(crate) fn run_tests() -> Workflow {
         &should_run_tests,
     ]);
 
-    let mut jobs = vec![
+    let jobs = vec![
         orchestrate,
         check_style(),
         should_run_tests.guard(clippy(Platform::Linux)),
-        should_run_tests.guard(clippy(Platform::Mac)),
-        should_run_tests.guard(run_platform_tests(Platform::Linux)),
         should_run_tests.guard(run_platform_tests(Platform::Mac)),
-        should_run_tests.guard(doctests()),
-        should_run_tests.guard(check_workspace_binaries()),
-        should_run_tests.guard(check_wasm()),
         should_run_tests.guard(check_dependencies()), // could be more specific here?
-        disabled(check_docs()),
         should_check_licences.guard(check_licenses()),
         should_check_scripts.guard(check_scripts()),
     ];
     let tests_pass = tests_pass(&jobs);
-
-    jobs.push(should_run_tests.guard(check_postgres_and_protobuf_migrations())); // could be more specific here?
 
     named::workflow()
         .add_event(
@@ -453,56 +445,6 @@ fn check_dependencies() -> NamedJob {
     ))
 }
 
-fn check_wasm() -> NamedJob {
-    fn install_nightly_wasm_toolchain() -> Step<Run> {
-        named::bash(
-            "rustup toolchain install nightly --component rust-src --target wasm32-unknown-unknown",
-        )
-    }
-
-    fn cargo_check_wasm() -> Step<Run> {
-        named::bash(concat!(
-            "cargo +nightly -Zbuild-std=std,panic_abort ",
-            "check --target wasm32-unknown-unknown -p gpui_platform",
-        ))
-        .add_env((
-            "CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS",
-            "-C target-feature=+atomics,+bulk-memory,+mutable-globals",
-        ))
-    }
-
-    named::job(
-        release_job(&[])
-            .runs_on(runners::LINUX_LARGE)
-            .add_step(steps::checkout_repo())
-            .add_step(steps::setup_cargo_config(Platform::Linux))
-            .add_step(steps::cache_rust_dependencies_namespace())
-            .add_step(install_nightly_wasm_toolchain())
-            .add_step(steps::setup_sccache(Platform::Linux))
-            .add_step(cargo_check_wasm())
-            .add_step(steps::show_sccache_stats(Platform::Linux))
-            .add_step(steps::cleanup_cargo_config(Platform::Linux)),
-    )
-}
-
-fn check_workspace_binaries() -> NamedJob {
-    named::job(use_clang(
-        release_job(&[])
-            .runs_on(runners::LINUX_LARGE)
-            .add_step(steps::checkout_repo())
-            .add_step(steps::setup_cargo_config(Platform::Linux))
-            .add_step(steps::cache_rust_dependencies_namespace())
-            .map(steps::install_linux_dependencies)
-            .add_step(steps::setup_sccache(Platform::Linux))
-            .add_step(steps::script("cargo build -p collab"))
-            .add_step(steps::script(
-                "CARGO_BUILD_JOBS=2 CARGO_PROFILE_DEV_DEBUG=0 cargo build --workspace --bins --examples",
-            ))
-            .add_step(steps::show_sccache_stats(Platform::Linux))
-            .add_step(steps::cleanup_cargo_config(Platform::Linux)),
-    ))
-}
-
 pub(crate) fn clippy(platform: Platform) -> NamedJob {
     let runner = match platform {
         Platform::Windows => runners::WINDOWS_DEFAULT,
@@ -591,86 +533,6 @@ fn run_platform_tests_impl(platform: Platform, filter_packages: bool) -> NamedJo
     }
 }
 
-pub(crate) fn check_postgres_and_protobuf_migrations() -> NamedJob {
-    fn ensure_fresh_merge() -> Step<Run> {
-        named::bash(indoc::indoc! {r#"
-            if [ -z "$GITHUB_BASE_REF" ];
-            then
-              echo "BUF_BASE_BRANCH=$(git merge-base origin/main HEAD)" >> "$GITHUB_ENV"
-            else
-              git checkout -B temp
-              git merge -q "origin/$GITHUB_BASE_REF" -m "merge main into temp"
-              echo "BUF_BASE_BRANCH=$GITHUB_BASE_REF" >> "$GITHUB_ENV"
-            fi
-        "#})
-    }
-
-    fn bufbuild_setup_action() -> Step<Use> {
-        named::uses("bufbuild", "buf-setup-action", "v1")
-            .add_with(("version", "v1.29.0"))
-            .add_with(("github_token", vars::GITHUB_TOKEN))
-    }
-
-    fn bufbuild_breaking_action() -> Step<Use> {
-        named::uses("bufbuild", "buf-breaking-action", "v1").add_with(("input", "crates/proto/proto/"))
-            .add_with(("against", "https://github.com/${GITHUB_REPOSITORY}.git#branch=${BUF_BASE_BRANCH},subdir=crates/proto/proto/"))
-    }
-
-    fn buf_lint() -> Step<Run> {
-        named::bash("buf lint crates/proto/proto")
-    }
-
-    fn check_protobuf_formatting() -> Step<Run> {
-        named::bash("buf format --diff --exit-code crates/proto/proto")
-    }
-
-    named::job(
-        release_job(&[])
-            .runs_on(runners::LINUX_DEFAULT)
-            .add_env(("GIT_AUTHOR_NAME", "Protobuf Action"))
-            .add_env(("GIT_AUTHOR_EMAIL", "ci@zed.dev"))
-            .add_env(("GIT_COMMITTER_NAME", "Protobuf Action"))
-            .add_env(("GIT_COMMITTER_EMAIL", "ci@zed.dev"))
-            .add_step(steps::checkout_repo().with_full_history())
-            .add_step(ensure_fresh_merge())
-            .add_step(bufbuild_setup_action())
-            .add_step(bufbuild_breaking_action())
-            .add_step(buf_lint())
-            .add_step(check_protobuf_formatting()),
-    )
-}
-
-fn doctests() -> NamedJob {
-    fn run_doctests() -> Step<Run> {
-        named::bash(indoc::indoc! {r#"
-            cargo test --workspace --doc --no-fail-fast
-        "#})
-        .id("run_doctests")
-    }
-
-    named::job(use_clang(
-        release_job(&[])
-            .runs_on(runners::LINUX_DEFAULT)
-            .add_step(steps::checkout_repo())
-            .add_step(steps::cache_rust_dependencies_namespace())
-            .map(steps::install_linux_dependencies)
-            .add_step(steps::setup_cargo_config(Platform::Linux))
-            .add_step(steps::setup_sccache(Platform::Linux))
-            .add_step(run_doctests())
-            .add_step(steps::show_sccache_stats(Platform::Linux))
-            .add_step(steps::cleanup_cargo_config(Platform::Linux)),
-    ))
-}
-
-fn disabled(job: NamedJob) -> NamedJob {
-    NamedJob {
-        name: job.name,
-        job: job.job.cond(Expression::new(
-            "github.repository == '__disabled__/__disabled__'",
-        )),
-    }
-}
-
 fn check_licenses() -> NamedJob {
     named::job(
         Job::default()
@@ -680,53 +542,6 @@ fn check_licenses() -> NamedJob {
             .add_step(steps::script("./script/check-licenses"))
             .add_step(steps::script("./script/generate-licenses")),
     )
-}
-
-fn check_docs() -> NamedJob {
-    fn lychee_link_check(dir: &str) -> Step<Use> {
-        named::uses(
-            "lycheeverse",
-            "lychee-action",
-            "82202e5e9c2f4ef1a55a3d02563e1cb6041e5332",
-        ) // v2.4.1
-        .add_with(("args", format!("--no-progress --exclude '^http' '{dir}'")))
-        .add_with(("fail", true))
-        .add_with(("jobSummary", false))
-    }
-
-    fn install_mdbook() -> Step<Use> {
-        named::uses(
-            "peaceiris",
-            "actions-mdbook",
-            "ee69d230fe19748b7abf22df32acaa93833fad08", // v2
-        )
-        .with(("mdbook-version", "0.4.37"))
-    }
-
-    fn build_docs() -> Step<Run> {
-        named::bash(indoc::indoc! {r#"
-            mkdir -p target/deploy
-            mdbook build ./docs --dest-dir=../target/deploy/docs/
-        "#})
-    }
-
-    named::job(use_clang(
-        release_job(&[])
-            .runs_on(runners::LINUX_LARGE)
-            .add_step(steps::checkout_repo())
-            .add_step(steps::setup_cargo_config(Platform::Linux))
-            .add_step(steps::cache_rust_dependencies_namespace())
-            .add_step(
-                lychee_link_check("./docs/src/**/*"), // check markdown links
-            )
-            .map(steps::install_linux_dependencies)
-            .add_step(steps::script("./script/generate-action-metadata"))
-            .add_step(install_mdbook())
-            .add_step(build_docs())
-            .add_step(
-                lychee_link_check("target/deploy/docs"), // check links in generated html
-            ),
-    ))
 }
 
 pub(crate) fn check_scripts() -> NamedJob {

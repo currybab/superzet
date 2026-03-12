@@ -1,13 +1,13 @@
 ---
 title: Update superzet
-description: How preview updates work in superzet.
+description: How release updates work in superzet.
 ---
 
 # Update superzet
 
 ## In-App Updates
 
-Bundled macOS preview builds check `releases.nangman.ai/releases` for new preview DMGs.
+Bundled macOS release builds check `releases.nangman.ai/releases` for new DMGs.
 
 When an update is available:
 
@@ -23,7 +23,7 @@ Auto-update is not expected to run for:
 - source builds
 - non-bundled binaries
 
-In those cases, update by rebuilding from source or installing a newer preview DMG manually.
+In those cases, update by rebuilding from source or installing a newer DMG manually.
 
 ## Operator Notes
 

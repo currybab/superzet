@@ -46,6 +46,7 @@ impl Arch {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Platform {
+    #[allow(dead_code)]
     Windows,
     Linux,
     Mac,

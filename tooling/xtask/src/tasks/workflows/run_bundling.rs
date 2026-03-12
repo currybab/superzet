@@ -1,11 +1,9 @@
 use std::path::Path;
 
 use crate::tasks::workflows::{
-    nix_build::build_nix,
-    release::ReleaseBundleJobs,
-    runners::{Arch, Platform},
-    steps::{DEFAULT_REPOSITORY_OWNER_GUARD, FluentBuilder, NamedJob, dependant_job, named},
-    vars::{assets, bundle_envs},
+    runners::Arch,
+    steps::{FluentBuilder, NamedJob, dependant_job, named},
+    vars::assets,
 };
 
 use super::{runners, steps};
@@ -13,16 +11,7 @@ use gh_workflow::*;
 use indoc::indoc;
 
 pub fn run_bundling() -> Workflow {
-    let bundle = ReleaseBundleJobs {
-        linux_aarch64: bundle_linux(Arch::AARCH64, &[]),
-        linux_x86_64: bundle_linux(Arch::X86_64, &[]),
-        mac_aarch64: bundle_mac(Arch::AARCH64, &[]),
-        mac_x86_64: bundle_mac(Arch::X86_64, &[]),
-        windows_aarch64: bundle_windows(Arch::AARCH64, &[]),
-        windows_x86_64: bundle_windows(Arch::X86_64, &[]),
-    };
-    let nix_linux_x86_64 = nix_job(Platform::Linux, Arch::X86_64);
-    let nix_mac_aarch64 = nix_job(Platform::Mac, Arch::AARCH64);
+    let bundle_mac_aarch64 = bundle_mac_aarch64();
     named::workflow()
         .on(Event::default().pull_request(
             PullRequest::default().types([PullRequestType::Labeled, PullRequestType::Synchronize]),
@@ -35,31 +24,7 @@ pub fn run_bundling() -> Workflow {
         )
         .add_env(("CARGO_TERM_COLOR", "always"))
         .add_env(("RUST_BACKTRACE", "1"))
-        .map(|mut workflow| {
-            for job in bundle.into_jobs() {
-                workflow = workflow.add_job(job.name, job.job);
-            }
-            workflow
-        })
-        .add_job(nix_linux_x86_64.name, nix_linux_x86_64.job)
-        .add_job(nix_mac_aarch64.name, nix_mac_aarch64.job)
-}
-
-fn nix_job(platform: Platform, arch: Arch) -> NamedJob {
-    let mut job = build_nix(
-        platform,
-        arch,
-        "default",
-        // don't push PR builds to the cache
-        Some("-zed-editor-[0-9.]*"),
-        &[],
-    );
-    job.job = job.job.cond(Expression::new(format!(
-        "{} && ((github.event.action == 'labeled' && github.event.label.name == 'run-bundling') || \
-        (github.event.action == 'synchronize' && contains(github.event.pull_request.labels.*.name, 'run-bundling')))",
-        DEFAULT_REPOSITORY_OWNER_GUARD
-    )));
-    job
+        .add_job(bundle_mac_aarch64.name, bundle_mac_aarch64.job)
 }
 
 fn bundle_job(deps: &[&NamedJob]) -> Job {
@@ -73,34 +38,22 @@ fn bundle_job(deps: &[&NamedJob]) -> Job {
         .timeout_minutes(60u32)
 }
 
-pub(crate) fn bundle_mac(arch: Arch, deps: &[&NamedJob]) -> NamedJob {
-    pub fn bundle_mac(arch: Arch) -> Step<Run> {
-        named::bash(&format!("./script/bundle-mac {arch}-apple-darwin"))
-    }
-    let platform = Platform::Mac;
-    let artifact_name = match arch {
-        Arch::X86_64 => assets::MAC_X86_64,
-        Arch::AARCH64 => assets::MAC_AARCH64,
-    };
-    let remote_server_artifact_name = match arch {
-        Arch::X86_64 => assets::REMOTE_SERVER_MAC_X86_64,
-        Arch::AARCH64 => assets::REMOTE_SERVER_MAC_AARCH64,
-    };
+fn bundle_mac_aarch64() -> NamedJob {
+    let arch = Arch::AARCH64;
     NamedJob {
         name: format!("bundle_mac_{arch}"),
-        job: bundle_job(deps)
+        job: bundle_job(&[])
             .runs_on(runners::MAC_DEFAULT)
-            .envs(bundle_envs(platform))
             .add_step(steps::checkout_repo())
             .add_step(steps::setup_node())
             .add_step(steps::setup_sentry())
             .add_step(steps::clear_target_dir_if_large(runners::Platform::Mac))
-            .add_step(bundle_mac(arch))
-            .add_step(upload_artifact(&format!(
-                "target/{arch}-apple-darwin/release/{artifact_name}"
+            .add_step(named::bash(&format!(
+                "./script/bundle-mac {arch}-apple-darwin"
             )))
             .add_step(upload_artifact(&format!(
-                "target/{remote_server_artifact_name}"
+                "target/{arch}-apple-darwin/release/{}",
+                assets::MAC_AARCH64
             ))),
     }
 }
@@ -118,64 +71,4 @@ pub fn upload_artifact(path: &str) -> Step<Use> {
         .add_with(("name", name))
         .add_with(("path", path))
         .add_with(("if-no-files-found", "error"))
-}
-
-pub(crate) fn bundle_linux(arch: Arch, deps: &[&NamedJob]) -> NamedJob {
-    let platform = Platform::Linux;
-    let artifact_name = match arch {
-        Arch::X86_64 => assets::LINUX_X86_64,
-        Arch::AARCH64 => assets::LINUX_AARCH64,
-    };
-    let remote_server_artifact_name = match arch {
-        Arch::X86_64 => assets::REMOTE_SERVER_LINUX_X86_64,
-        Arch::AARCH64 => assets::REMOTE_SERVER_LINUX_AARCH64,
-    };
-    NamedJob {
-        name: format!("bundle_linux_{arch}"),
-        job: bundle_job(deps)
-            .runs_on(arch.linux_bundler())
-            .envs(bundle_envs(platform))
-            .add_env(Env::new("CC", "clang-18"))
-            .add_env(Env::new("CXX", "clang++-18"))
-            .add_step(steps::checkout_repo())
-            .add_step(steps::setup_sentry())
-            .map(steps::install_linux_dependencies)
-            .add_step(steps::script("./script/bundle-linux"))
-            .add_step(upload_artifact(&format!("target/release/{artifact_name}")))
-            .add_step(upload_artifact(&format!(
-                "target/{remote_server_artifact_name}"
-            ))),
-    }
-}
-
-pub(crate) fn bundle_windows(arch: Arch, deps: &[&NamedJob]) -> NamedJob {
-    let platform = Platform::Windows;
-    pub fn bundle_windows(arch: Arch) -> Step<Run> {
-        let step = match arch {
-            Arch::X86_64 => named::pwsh("script/bundle-windows.ps1 -Architecture x86_64"),
-            Arch::AARCH64 => named::pwsh("script/bundle-windows.ps1 -Architecture aarch64"),
-        };
-        step.working_directory("${{ env.ZED_WORKSPACE }}")
-    }
-    let artifact_name = match arch {
-        Arch::X86_64 => assets::WINDOWS_X86_64,
-        Arch::AARCH64 => assets::WINDOWS_AARCH64,
-    };
-    let remote_server_artifact_name = match arch {
-        Arch::X86_64 => assets::REMOTE_SERVER_WINDOWS_X86_64,
-        Arch::AARCH64 => assets::REMOTE_SERVER_WINDOWS_AARCH64,
-    };
-    NamedJob {
-        name: format!("bundle_windows_{arch}"),
-        job: bundle_job(deps)
-            .runs_on(runners::WINDOWS_DEFAULT)
-            .envs(bundle_envs(platform))
-            .add_step(steps::checkout_repo())
-            .add_step(steps::setup_sentry())
-            .add_step(bundle_windows(arch))
-            .add_step(upload_artifact(&format!("target/{artifact_name}")))
-            .add_step(upload_artifact(&format!(
-                "target/{remote_server_artifact_name}"
-            ))),
-    }
 }

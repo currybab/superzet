@@ -19,7 +19,7 @@ Run the app:
 cargo run -p superzet
 ```
 
-Check the default lightweight build:
+Day-to-day development should stay on the default lightweight build:
 
 ```sh
 cargo check -p superzet
@@ -34,7 +34,7 @@ Run clippy:
 Build the heavier upstream-like surface only when you actually need it:
 
 ```sh
-cargo build -p superzet --features full
+cargo check -p superzet --features full
 ```
 
 ## Release Flavors
@@ -45,10 +45,25 @@ That excludes:
 
 - collab
 - calls / WebRTC
-- ACP and hosted AI surfaces
-- edit prediction and related upstream stacks
+- inherited agent panel and text-thread UI
+- hosted AI and edit prediction stacks
 
 `--features full` is still available for debugging inherited upstream behavior.
+
+## Validation Paths
+
+For day-to-day work:
+
+```sh
+cargo check -p superzet
+./script/clippy
+```
+
+Before cutting a release:
+
+```sh
+./script/check-local-ci
+```
 
 ## Keychain Access
 

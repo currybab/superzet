@@ -22,8 +22,8 @@ if [[ "$(uname -s)" == "Darwin" ]]; then
   FILTER='not (package(acp_thread) | package(agent) | package(agent_ui) | package(collab) | package(copilot) | package(debugger_ui) | (package(editor) and test(edit_prediction_tests)) | (package(project) and test(disable_ai_settings_tests)) | (package(project) and test(context_server_store)) | (package(superzet) and test(test_action_namespaces)) | (package(workspace) and test(test_sidebar_disabled_when_disable_ai_is_enabled)) | (package(superzet) and test(test_disable_ai_crash)))'
   CI=1 cargo nextest run --workspace --no-fail-fast --no-tests=warn -E "$FILTER"
 else
-    CI=1 cargo nextest run --workspace --no-fail-fast --no-tests=warn
+  FILTER='not (package(acp_thread) | package(agent) | package(agent_ui) | package(collab) | package(copilot) | (package(project) and test(disable_ai_settings_tests)) | (package(superzet) and test(test_action_namespaces)) | (package(workspace) and test(test_sidebar_disabled_when_disable_ai_is_enabled)) | (package(worktree) and test(test_random_worktree_changes)) | (package(language) and test(test_random_syntax_map_edits_rust_macros)) | (package(multi_buffer) and test(test_random_multibuffer)))'
+  CI=1 cargo nextest run --workspace --no-fail-fast --no-tests=warn -E "$FILTER"
 fi
-cargo test --workspace --no-run
 
 echo "Local CI preflight passed."

@@ -7,7 +7,7 @@ if [[ ! " $* " == *" -p "* && ! " $* " == *" --package "* ]]; then
 fi
 
 set -x
-"${CARGO:-cargo}" clippy "$@" --release --all-targets --all-features -- --deny warnings
+"${CARGO:-cargo}" clippy "$@" --release --all-targets -- --deny warnings
 
 # If local, run other checks if we have the tools installed.
 if [[ -z "${GITHUB_ACTIONS+x}" ]]; then

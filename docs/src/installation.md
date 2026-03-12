@@ -1,15 +1,15 @@
 ---
 title: Install superzet
-description: Install the current public preview of superzet.
+description: Install the current public release of superzet.
 ---
 
 # Installing superzet
 
-## Public Preview
+## Public Release
 
 The current public release target is macOS on Apple Silicon.
 
-Download the latest preview DMG from GitHub Releases:
+Download the latest DMG from GitHub Releases:
 
 - [superzet releases](https://github.com/currybab/superzet/releases)
 
@@ -19,7 +19,7 @@ Install it by:
 2. opening the DMG
 3. dragging `superzet` into `/Applications`
 
-After the first bundled install, preview builds can update in-app through the `releases.nangman.ai/releases` update feed.
+After the first bundled install, release builds can update in-app through the `releases.nangman.ai/releases` update feed.
 
 ## Build From Source
 
@@ -55,5 +55,5 @@ For a signed and notarized bundle, the release environment must provide the Appl
 
 ## Current Platform Scope
 
-- macOS Apple Silicon: public preview release
+- macOS Apple Silicon: public release
 - macOS Intel / Linux / Windows: source builds and inherited upstream development paths only

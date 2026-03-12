@@ -20,28 +20,6 @@ fn stable_release_tag_guard(valid_release_tag: &JobOutput) -> Expression {
     ))
 }
 
-pub(crate) struct ReleaseBundleJobs {
-    pub linux_aarch64: NamedJob,
-    pub linux_x86_64: NamedJob,
-    pub mac_aarch64: NamedJob,
-    pub mac_x86_64: NamedJob,
-    pub windows_aarch64: NamedJob,
-    pub windows_x86_64: NamedJob,
-}
-
-impl ReleaseBundleJobs {
-    pub(crate) fn into_jobs(self) -> Vec<NamedJob> {
-        vec![
-            self.linux_aarch64,
-            self.linux_x86_64,
-            self.mac_aarch64,
-            self.mac_x86_64,
-            self.windows_aarch64,
-            self.windows_x86_64,
-        ]
-    }
-}
-
 pub(crate) fn release() -> Workflow {
     let (validate_release_tag, valid_release_tag) = validate_release_tag();
     let bundle_mac = bundle_mac_stable(&validate_release_tag, &valid_release_tag);

@@ -195,106 +195,6 @@ jobs:
     - name: steps::show_sccache_stats
       run: sccache --show-stats || true
     timeout-minutes: 60
-  clippy_mac:
-    needs:
-    - orchestrate
-    if: needs.orchestrate.outputs.run_tests == 'true'
-    runs-on: macos-latest
-    steps:
-    - name: steps::checkout_repo
-      uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-      with:
-        clean: false
-    - name: steps::setup_cargo_config
-      run: |
-        mkdir -p ./../.cargo
-        cp ./.cargo/ci-config.toml ./../.cargo/config.toml
-    - name: steps::cache_rust_dependencies_namespace
-      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
-      with:
-        path: ~/.rustup
-        key: ${{ runner.os }}-${{ runner.arch }}-rustup-${{ hashFiles('rust-toolchain.toml') }}
-        restore-keys: ${{ runner.os }}-${{ runner.arch }}-rustup-
-    - name: steps::setup_sccache
-      run: ./script/setup-sccache
-      env:
-        R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
-        R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-        R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-        SCCACHE_BUCKET: sccache-zed
-    - name: steps::clippy
-      run: ./script/clippy
-    - name: steps::show_sccache_stats
-      run: sccache --show-stats || true
-    timeout-minutes: 60
-  run_tests_linux:
-    needs:
-    - orchestrate
-    if: needs.orchestrate.outputs.run_tests == 'true'
-    runs-on: ubuntu-24.04
-    env:
-      CC: clang
-      CXX: clang++
-    steps:
-    - name: steps::checkout_repo
-      uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-      with:
-        clean: false
-    - name: steps::setup_cargo_config
-      run: |
-        mkdir -p ./../.cargo
-        cp ./.cargo/ci-config.toml ./../.cargo/config.toml
-    - name: steps::cache_rust_dependencies_namespace
-      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
-      with:
-        path: ~/.rustup
-        key: ${{ runner.os }}-${{ runner.arch }}-rustup-${{ hashFiles('rust-toolchain.toml') }}
-        restore-keys: ${{ runner.os }}-${{ runner.arch }}-rustup-
-    - name: steps::setup_linux
-      run: ./script/linux
-    - name: steps::install_mold
-      run: ./script/install-mold
-    - name: steps::download_wasi_sdk
-      run: ./script/download-wasi-sdk
-    - name: steps::setup_node
-      uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-      with:
-        node-version: '20'
-    - name: steps::cargo_install_nextest
-      uses: taiki-e/install-action@nextest
-    - name: steps::clear_target_dir_if_large
-      run: ./script/clear-target-dir-if-larger-than 250
-    - name: steps::setup_sccache
-      run: ./script/setup-sccache
-      env:
-        R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
-        R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-        R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-        SCCACHE_BUCKET: sccache-zed
-    - name: run_tests::cargo_nextest_for_platform
-      run: |
-        FILTER='not (package(acp_thread) | package(agent) | package(agent_ui) | package(collab) | package(copilot) | (package(project) and test(disable_ai_settings_tests)) | (package(superzet) and test(test_action_namespaces)) | (package(workspace) and test(test_sidebar_disabled_when_disable_ai_is_enabled)) | (package(worktree) and test(test_random_worktree_changes)) | (package(language) and test(test_random_syntax_map_edits_rust_macros)) | (package(multi_buffer) and test(test_random_multibuffer)))'
-        if [ -n "$CHANGED_PACKAGES" ]; then
-          FILTER="($CHANGED_PACKAGES) and ($FILTER)"
-        fi
-        cargo nextest run --workspace --no-fail-fast --no-tests=warn -E "$FILTER"
-      env:
-        CHANGED_PACKAGES: ${{ needs.orchestrate.outputs.changed_packages }}
-    - name: steps::show_sccache_stats
-      run: sccache --show-stats || true
-    - name: steps::cleanup_cargo_config
-      if: always()
-      run: |
-        rm -rf ./../.cargo
-    timeout-minutes: 60
-    services:
-      postgres:
-        image: postgres:15
-        env:
-          POSTGRES_HOST_AUTH_METHOD: trust
-        ports:
-        - 5432:5432
-        options: --health-cmd pg_isready --health-interval 500ms --health-timeout 5s --health-retries 10
   run_tests_mac:
     needs:
     - orchestrate
@@ -346,140 +246,6 @@ jobs:
       run: |
         rm -rf ./../.cargo
     timeout-minutes: 60
-  doctests:
-    needs:
-    - orchestrate
-    if: needs.orchestrate.outputs.run_tests == 'true'
-    runs-on: ubuntu-24.04
-    env:
-      CC: clang
-      CXX: clang++
-    steps:
-    - name: steps::checkout_repo
-      uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-      with:
-        clean: false
-    - name: steps::cache_rust_dependencies_namespace
-      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
-      with:
-        path: ~/.rustup
-        key: ${{ runner.os }}-${{ runner.arch }}-rustup-${{ hashFiles('rust-toolchain.toml') }}
-        restore-keys: ${{ runner.os }}-${{ runner.arch }}-rustup-
-    - name: steps::setup_linux
-      run: ./script/linux
-    - name: steps::install_mold
-      run: ./script/install-mold
-    - name: steps::download_wasi_sdk
-      run: ./script/download-wasi-sdk
-    - name: steps::setup_cargo_config
-      run: |
-        mkdir -p ./../.cargo
-        cp ./.cargo/ci-config.toml ./../.cargo/config.toml
-    - name: steps::setup_sccache
-      run: ./script/setup-sccache
-      env:
-        R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
-        R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-        R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-        SCCACHE_BUCKET: sccache-zed
-    - id: run_doctests
-      name: run_tests::doctests::run_doctests
-      run: |
-        cargo test --workspace --doc --no-fail-fast
-    - name: steps::show_sccache_stats
-      run: sccache --show-stats || true
-    - name: steps::cleanup_cargo_config
-      if: always()
-      run: |
-        rm -rf ./../.cargo
-    timeout-minutes: 60
-  check_workspace_binaries:
-    needs:
-    - orchestrate
-    if: needs.orchestrate.outputs.run_tests == 'true'
-    runs-on: ubuntu-24.04
-    env:
-      CC: clang
-      CXX: clang++
-    steps:
-    - name: steps::checkout_repo
-      uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-      with:
-        clean: false
-    - name: steps::setup_cargo_config
-      run: |
-        mkdir -p ./../.cargo
-        cp ./.cargo/ci-config.toml ./../.cargo/config.toml
-    - name: steps::cache_rust_dependencies_namespace
-      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
-      with:
-        path: ~/.rustup
-        key: ${{ runner.os }}-${{ runner.arch }}-rustup-${{ hashFiles('rust-toolchain.toml') }}
-        restore-keys: ${{ runner.os }}-${{ runner.arch }}-rustup-
-    - name: steps::setup_linux
-      run: ./script/linux
-    - name: steps::install_mold
-      run: ./script/install-mold
-    - name: steps::download_wasi_sdk
-      run: ./script/download-wasi-sdk
-    - name: steps::setup_sccache
-      run: ./script/setup-sccache
-      env:
-        R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
-        R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-        R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-        SCCACHE_BUCKET: sccache-zed
-    - name: cargo build -p collab
-      run: cargo build -p collab
-    - name: CARGO_BUILD_JOBS=2 CARGO_PROFILE_DEV_DEBUG=0 cargo build --workspace --bins --examples
-      run: CARGO_BUILD_JOBS=2 CARGO_PROFILE_DEV_DEBUG=0 cargo build --workspace --bins --examples
-    - name: steps::show_sccache_stats
-      run: sccache --show-stats || true
-    - name: steps::cleanup_cargo_config
-      if: always()
-      run: |
-        rm -rf ./../.cargo
-    timeout-minutes: 60
-  check_wasm:
-    needs:
-    - orchestrate
-    if: needs.orchestrate.outputs.run_tests == 'true'
-    runs-on: ubuntu-24.04
-    steps:
-    - name: steps::checkout_repo
-      uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-      with:
-        clean: false
-    - name: steps::setup_cargo_config
-      run: |
-        mkdir -p ./../.cargo
-        cp ./.cargo/ci-config.toml ./../.cargo/config.toml
-    - name: steps::cache_rust_dependencies_namespace
-      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
-      with:
-        path: ~/.rustup
-        key: ${{ runner.os }}-${{ runner.arch }}-rustup-${{ hashFiles('rust-toolchain.toml') }}
-        restore-keys: ${{ runner.os }}-${{ runner.arch }}-rustup-
-    - name: run_tests::check_wasm::install_nightly_wasm_toolchain
-      run: rustup toolchain install nightly --component rust-src --target wasm32-unknown-unknown
-    - name: steps::setup_sccache
-      run: ./script/setup-sccache
-      env:
-        R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
-        R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-        R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-        SCCACHE_BUCKET: sccache-zed
-    - name: run_tests::check_wasm::cargo_check_wasm
-      run: cargo +nightly -Zbuild-std=std,panic_abort check --target wasm32-unknown-unknown -p gpui_platform
-      env:
-        CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUSTFLAGS: -C target-feature=+atomics,+bulk-memory,+mutable-globals
-    - name: steps::show_sccache_stats
-      run: sccache --show-stats || true
-    - name: steps::cleanup_cargo_config
-      if: always()
-      run: |
-        rm -rf ./../.cargo
-    timeout-minutes: 60
   check_dependencies:
     needs:
     - orchestrate
@@ -515,56 +281,6 @@ jobs:
       uses: actions/dependency-review-action@67d4f4bd7a9b17a0db54d2a7519187c65e339de8
       with:
         license-check: false
-    timeout-minutes: 60
-  check_docs:
-    if: github.repository == '__disabled__/__disabled__'
-    runs-on: ubuntu-24.04
-    env:
-      CC: clang
-      CXX: clang++
-    steps:
-    - name: steps::checkout_repo
-      uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-      with:
-        clean: false
-    - name: steps::setup_cargo_config
-      run: |
-        mkdir -p ./../.cargo
-        cp ./.cargo/ci-config.toml ./../.cargo/config.toml
-    - name: steps::cache_rust_dependencies_namespace
-      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
-      with:
-        path: ~/.rustup
-        key: ${{ runner.os }}-${{ runner.arch }}-rustup-${{ hashFiles('rust-toolchain.toml') }}
-        restore-keys: ${{ runner.os }}-${{ runner.arch }}-rustup-
-    - name: run_tests::check_docs::lychee_link_check
-      uses: lycheeverse/lychee-action@82202e5e9c2f4ef1a55a3d02563e1cb6041e5332
-      with:
-        args: --no-progress --exclude '^http' './docs/src/**/*'
-        fail: true
-        jobSummary: false
-    - name: steps::setup_linux
-      run: ./script/linux
-    - name: steps::install_mold
-      run: ./script/install-mold
-    - name: steps::download_wasi_sdk
-      run: ./script/download-wasi-sdk
-    - name: ./script/generate-action-metadata
-      run: ./script/generate-action-metadata
-    - name: run_tests::check_docs::install_mdbook
-      uses: peaceiris/actions-mdbook@ee69d230fe19748b7abf22df32acaa93833fad08
-      with:
-        mdbook-version: 0.4.37
-    - name: run_tests::check_docs::build_docs
-      run: |
-        mkdir -p target/deploy
-        mdbook build ./docs --dest-dir=../target/deploy/docs/
-    - name: run_tests::check_docs::lychee_link_check
-      uses: lycheeverse/lychee-action@82202e5e9c2f4ef1a55a3d02563e1cb6041e5332
-      with:
-        args: --no-progress --exclude '^http' 'target/deploy/docs'
-        fail: true
-        jobSummary: false
     timeout-minutes: 60
   check_licenses:
     needs:
@@ -620,60 +336,13 @@ jobs:
           exit 1
         fi
     timeout-minutes: 60
-  check_postgres_and_protobuf_migrations:
-    needs:
-    - orchestrate
-    if: needs.orchestrate.outputs.run_tests == 'true'
-    runs-on: ubuntu-24.04
-    env:
-      GIT_AUTHOR_NAME: Protobuf Action
-      GIT_AUTHOR_EMAIL: ci@zed.dev
-      GIT_COMMITTER_NAME: Protobuf Action
-      GIT_COMMITTER_EMAIL: ci@zed.dev
-    steps:
-    - name: steps::checkout_repo
-      uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-      with:
-        clean: false
-        fetch-depth: 0
-    - name: run_tests::check_postgres_and_protobuf_migrations::ensure_fresh_merge
-      run: |
-        if [ -z "$GITHUB_BASE_REF" ];
-        then
-          echo "BUF_BASE_BRANCH=$(git merge-base origin/main HEAD)" >> "$GITHUB_ENV"
-        else
-          git checkout -B temp
-          git merge -q "origin/$GITHUB_BASE_REF" -m "merge main into temp"
-          echo "BUF_BASE_BRANCH=$GITHUB_BASE_REF" >> "$GITHUB_ENV"
-        fi
-    - name: run_tests::check_postgres_and_protobuf_migrations::bufbuild_setup_action
-      uses: bufbuild/buf-setup-action@v1
-      with:
-        version: v1.29.0
-        github_token: ${{ secrets.GITHUB_TOKEN }}
-    - name: run_tests::check_postgres_and_protobuf_migrations::bufbuild_breaking_action
-      uses: bufbuild/buf-breaking-action@v1
-      with:
-        input: crates/proto/proto/
-        against: https://github.com/${GITHUB_REPOSITORY}.git#branch=${BUF_BASE_BRANCH},subdir=crates/proto/proto/
-    - name: run_tests::check_postgres_and_protobuf_migrations::buf_lint
-      run: buf lint crates/proto/proto
-    - name: run_tests::check_postgres_and_protobuf_migrations::check_protobuf_formatting
-      run: buf format --diff --exit-code crates/proto/proto
-    timeout-minutes: 60
   tests_pass:
     needs:
     - orchestrate
     - check_style
     - clippy_linux
-    - clippy_mac
-    - run_tests_linux
     - run_tests_mac
-    - doctests
-    - check_workspace_binaries
-    - check_wasm
     - check_dependencies
-    - check_docs
     - check_licenses
     - check_scripts
     if: github.repository_owner == 'currybab' && always()
@@ -692,14 +361,8 @@ jobs:
         check_result "orchestrate" "$RESULT_ORCHESTRATE"
         check_result "check_style" "$RESULT_CHECK_STYLE"
         check_result "clippy_linux" "$RESULT_CLIPPY_LINUX"
-        check_result "clippy_mac" "$RESULT_CLIPPY_MAC"
-        check_result "run_tests_linux" "$RESULT_RUN_TESTS_LINUX"
         check_result "run_tests_mac" "$RESULT_RUN_TESTS_MAC"
-        check_result "doctests" "$RESULT_DOCTESTS"
-        check_result "check_workspace_binaries" "$RESULT_CHECK_WORKSPACE_BINARIES"
-        check_result "check_wasm" "$RESULT_CHECK_WASM"
         check_result "check_dependencies" "$RESULT_CHECK_DEPENDENCIES"
-        check_result "check_docs" "$RESULT_CHECK_DOCS"
         check_result "check_licenses" "$RESULT_CHECK_LICENSES"
         check_result "check_scripts" "$RESULT_CHECK_SCRIPTS"
 
@@ -708,14 +371,8 @@ jobs:
         RESULT_ORCHESTRATE: ${{ needs.orchestrate.result }}
         RESULT_CHECK_STYLE: ${{ needs.check_style.result }}
         RESULT_CLIPPY_LINUX: ${{ needs.clippy_linux.result }}
-        RESULT_CLIPPY_MAC: ${{ needs.clippy_mac.result }}
-        RESULT_RUN_TESTS_LINUX: ${{ needs.run_tests_linux.result }}
         RESULT_RUN_TESTS_MAC: ${{ needs.run_tests_mac.result }}
-        RESULT_DOCTESTS: ${{ needs.doctests.result }}
-        RESULT_CHECK_WORKSPACE_BINARIES: ${{ needs.check_workspace_binaries.result }}
-        RESULT_CHECK_WASM: ${{ needs.check_wasm.result }}
         RESULT_CHECK_DEPENDENCIES: ${{ needs.check_dependencies.result }}
-        RESULT_CHECK_DOCS: ${{ needs.check_docs.result }}
         RESULT_CHECK_LICENSES: ${{ needs.check_licenses.result }}
         RESULT_CHECK_SCRIPTS: ${{ needs.check_scripts.result }}
 concurrency:

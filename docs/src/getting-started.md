@@ -51,12 +51,13 @@ The default build is intentionally narrow:
 - native editor, panes, and diffs
 - terminal-driven agent workflows
 
-Not part of the public preview scope:
+Not part of the current public shell surface:
 
 - collaboration
 - hosted AI surfaces
-- remote-server distribution
+- Zed's own agent panel and text threads
+- public Windows and Linux desktop releases
 
-## Public Preview Availability
+## Public Release Availability
 
-The first public binary release is currently macOS preview only. Other platforms are still source-build territory.
+The first public binary release is currently macOS Apple Silicon only. Other platforms are still source-build territory.

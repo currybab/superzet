@@ -7,7 +7,7 @@ description: Remove superzet from your machine.
 
 ## macOS
 
-If you installed the preview DMG build:
+If you installed the release DMG build:
 
 1. quit `superzet`
 2. drag `/Applications/superzet.app` to the Trash
@@ -18,11 +18,13 @@ If you installed the preview DMG build:
 To remove local app data as well, delete these paths if they exist:
 
 - `~/Library/Application Support/superzet`
-- `~/Library/Caches/ai.nangman.superzet`
+- `~/Library/Caches/superzet`
 - `~/Library/Logs/superzet`
+- `~/.config/superzet`
+- `~/.local/state/superzet`
 - `~/Library/Saved Application State/ai.nangman.superzet.savedState`
 
-If you are using preview, nightly, or dev channels, remove the matching bundle identifier paths for those channels instead.
+If you also use dev builds, remove the matching `superzet-dev` and `ai.nangman.superzet-dev` paths as well.
 
 ## Source Builds
 

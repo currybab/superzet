@@ -9,18 +9,15 @@ use crate::tasks::workflow_checks::{self};
 mod autofix_pr;
 mod bump_patch_version;
 mod cherry_pick;
-mod compare_perf;
 mod danger;
 mod extension_bump;
 mod extension_tests;
 mod extension_workflow_rollout;
 mod extensions;
-mod nix_build;
 mod publish_extension_cli;
 mod run_bundling;
 
 mod release;
-mod run_agent_evals;
 mod run_tests;
 mod runners;
 mod steps;
@@ -130,16 +127,12 @@ pub fn run_workflows(_: GenerateWorkflowArgs) -> Result<()> {
         WorkflowFile::zed(autofix_pr::autofix_pr),
         WorkflowFile::zed(bump_patch_version::bump_patch_version),
         WorkflowFile::zed(cherry_pick::cherry_pick),
-        WorkflowFile::zed(compare_perf::compare_perf),
         WorkflowFile::zed(danger::danger),
         WorkflowFile::zed(extension_bump::extension_bump),
         WorkflowFile::zed(extension_tests::extension_tests),
         WorkflowFile::zed(extension_workflow_rollout::extension_workflow_rollout),
         WorkflowFile::zed(publish_extension_cli::publish_extension_cli),
         WorkflowFile::zed(release::release),
-        WorkflowFile::zed(run_agent_evals::run_agent_evals),
-        WorkflowFile::zed(run_agent_evals::run_cron_unit_evals),
-        WorkflowFile::zed(run_agent_evals::run_unit_evals),
         WorkflowFile::zed(run_bundling::run_bundling),
         WorkflowFile::zed(run_tests::run_tests),
         /* workflows used for CI/CD in extension repositories */

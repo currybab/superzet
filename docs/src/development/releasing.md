@@ -1,6 +1,6 @@
 ---
 title: Releasing superzet
-description: Preview release, update feed, and operator setup for superzet.
+description: Stable release, update feed, and operator setup for superzet.
 ---
 
 # Releasing superzet
@@ -9,23 +9,23 @@ description: Preview release, update feed, and operator setup for superzet.
 
 The current public release flow is:
 
-- channel: `preview`
+- channel: `stable`
 - platform: macOS Apple Silicon
 - asset host: GitHub Releases
 - update feed: `releases.nangman.ai/releases/...` via Cloudflare worker
 
 ## Tagging
 
-Publish a preview release by pushing a tag shaped like:
+Publish a release by pushing a tag shaped like:
 
 ```sh
-git tag v0.1.0-pre
-git push origin v0.1.0-pre
+git tag v0.1.0
+git push origin v0.1.0
 ```
 
 That triggers the release workflow, which:
 
-1. builds a preview bundle with `SUPERZET_RELEASE_CHANNEL=preview`
+1. builds a stable bundle with `SUPERZET_RELEASE_CHANNEL=stable`
 2. notarizes `superzet-aarch64.dmg`
 3. uploads the DMG, Linux remote-server assets, and `sha256sums.txt` to the GitHub Release for that tag
 
@@ -73,13 +73,11 @@ The updater expects:
 }
 ```
 
-For preview releases, Git tags still use `-pre`, but the update worker strips that suffix before returning `version` so app-side semver comparison continues to work.
-
 ## Current Non-Goals
 
 These are not part of the first public release flow:
 
-- Linux or Windows binary publishing
+- Linux or Windows desktop binary publishing
 - collab deployment
 - hosted AI deployment
 - Sentry or other upstream release automation

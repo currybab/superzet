@@ -19,17 +19,12 @@ macro_rules! var {
     };
 }
 
-secret!(ANTHROPIC_API_KEY);
-secret!(OPENAI_API_KEY);
-secret!(GOOGLE_AI_API_KEY);
-secret!(GOOGLE_CLOUD_PROJECT);
 secret!(APPLE_NOTARIZATION_ISSUER_ID);
 secret!(APPLE_NOTARIZATION_KEY);
 secret!(APPLE_NOTARIZATION_KEY_ID);
 secret!(AZURE_SIGNING_CLIENT_ID);
 secret!(AZURE_SIGNING_CLIENT_SECRET);
 secret!(AZURE_SIGNING_TENANT_ID);
-secret!(CACHIX_AUTH_TOKEN);
 secret!(DIGITALOCEAN_SPACES_ACCESS_KEY);
 secret!(DIGITALOCEAN_SPACES_SECRET_KEY);
 secret!(GITHUB_TOKEN);
@@ -37,9 +32,7 @@ secret!(MACOS_CERTIFICATE);
 secret!(MACOS_CERTIFICATE_PASSWORD);
 secret!(SENTRY_AUTH_TOKEN);
 secret!(ZED_CLIENT_CHECKSUM_SEED);
-secret!(ZED_CLOUD_PROVIDER_ADDITIONAL_MODELS_JSON);
 secret!(ZED_SENTRY_MINIDUMP_ENDPOINT);
-secret!(SLACK_APP_ZED_UNIT_EVALS_BOT_TOKEN);
 secret!(ZED_ZIPPY_APP_ID);
 secret!(ZED_ZIPPY_APP_PRIVATE_KEY);
 secret!(R2_ACCOUNT_ID);
@@ -109,12 +102,6 @@ pub fn one_workflow_per_non_main_branch_and_token<T: AsRef<str>>(token: T) -> Co
             ),
             token.as_ref()
         ))
-        .cancel_in_progress(true)
-}
-
-pub(crate) fn allow_concurrent_runs() -> Concurrency {
-    Concurrency::default()
-        .group("${{ github.workflow }}-${{ github.ref_name }}-${{ github.run_id }}")
         .cancel_in_progress(true)
 }
 
@@ -343,16 +330,6 @@ impl serde::Serialize for WorkflowSecret {
 
 pub mod assets {
     pub const MAC_AARCH64: &str = "superzet-aarch64.dmg";
-    pub const MAC_X86_64: &str = "superzet-x86_64.dmg";
-    pub const LINUX_AARCH64: &str = "superzet-linux-aarch64.tar.gz";
-    pub const LINUX_X86_64: &str = "superzet-linux-x86_64.tar.gz";
-    pub const WINDOWS_X86_64: &str = "superzet-x86_64.exe";
-    pub const WINDOWS_AARCH64: &str = "superzet-aarch64.exe";
-
-    pub const REMOTE_SERVER_MAC_AARCH64: &str = "superzet-remote-server-macos-aarch64.gz";
-    pub const REMOTE_SERVER_MAC_X86_64: &str = "superzet-remote-server-macos-x86_64.gz";
     pub const REMOTE_SERVER_LINUX_AARCH64: &str = "superzet-remote-server-linux-aarch64.gz";
     pub const REMOTE_SERVER_LINUX_X86_64: &str = "superzet-remote-server-linux-x86_64.gz";
-    pub const REMOTE_SERVER_WINDOWS_AARCH64: &str = "superzet-remote-server-windows-aarch64.zip";
-    pub const REMOTE_SERVER_WINDOWS_X86_64: &str = "superzet-remote-server-windows-x86_64.zip";
 }

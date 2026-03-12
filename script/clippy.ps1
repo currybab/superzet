@@ -25,8 +25,8 @@ if ($env:CARGO)
 
 if ($needAddWorkspace)
 {
-    & $Cargo clippy @args --workspace --release --all-targets --all-features -- --deny warnings
+    & $Cargo clippy @args --workspace --release --all-targets -- --deny warnings
 } else
 {
-    & $Cargo clippy @args --release --all-targets --all-features -- --deny warnings
+    & $Cargo clippy @args --release --all-targets -- --deny warnings
 }

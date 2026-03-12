@@ -277,17 +277,6 @@ pub fn show_sccache_stats(platform: Platform) -> Step<Run> {
     }
 }
 
-pub fn cache_nix_dependencies_namespace() -> Step<Use> {
-    named::uses("namespacelabs", "nscloud-cache-action", "v1").add_with(("cache", "nix"))
-}
-
-pub fn cache_nix_store_macos() -> Step<Use> {
-    // On macOS, `/nix` is on a read-only root filesystem so nscloud's `cache: nix`
-    // cannot mount or symlink there. Instead we cache a user-writable directory and
-    // use nix-store --import/--export in separate steps to transfer store paths.
-    named::uses("namespacelabs", "nscloud-cache-action", "v1").add_with(("path", "~/nix-cache"))
-}
-
 pub fn setup_linux() -> Step<Run> {
     named::bash("./script/linux")
 }
@@ -512,11 +501,6 @@ pub mod named {
             .collect::<Vec<_>>()
             .join("::")
     }
-}
-
-pub fn git_checkout(ref_name: &dyn std::fmt::Display) -> Step<Run> {
-    named::bash(r#"git fetch origin "$REF_NAME" && git checkout "$REF_NAME""#)
-        .add_env(("REF_NAME", ref_name.to_string()))
 }
 
 pub fn authenticate_as_zippy() -> (Step<Use>, StepOutput) {
