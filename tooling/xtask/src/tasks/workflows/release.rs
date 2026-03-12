@@ -1,17 +1,24 @@
-use gh_workflow::{Event, Level, Permissions, Push, Step, Use, Workflow};
-use indoc::formatdoc;
+use gh_workflow::{Event, Expression, Job, Level, Permissions, Push, Run, Step, Use, Workflow};
+use indoc::{formatdoc, indoc};
 
 use crate::tasks::workflows::{
     run_bundling::upload_artifact,
     runners::{self, Arch, Platform},
-    steps::{self, CommonJobConditions, FluentBuilder, NamedJob, dependant_job, named},
-    vars::{self, assets, bundle_envs},
+    steps::{self, DEFAULT_REPOSITORY_OWNER_GUARD, FluentBuilder, NamedJob, dependant_job, named},
+    vars::{self, JobOutput, StepOutput, assets, bundle_envs},
 };
 
 const RELEASE_ARTIFACT: &str = "superzet-aarch64.dmg";
 const REMOTE_SERVER_LINUX_AARCH64_ARTIFACT: &str = assets::REMOTE_SERVER_LINUX_AARCH64;
 const REMOTE_SERVER_LINUX_X86_64_ARTIFACT: &str = assets::REMOTE_SERVER_LINUX_X86_64;
 const CHECKSUM_ARTIFACT: &str = "sha256sums.txt";
+
+fn stable_release_tag_guard(valid_release_tag: &JobOutput) -> Expression {
+    Expression::new(format!(
+        "{DEFAULT_REPOSITORY_OWNER_GUARD} && {} == 'true'",
+        valid_release_tag.expr()
+    ))
+}
 
 pub(crate) struct ReleaseBundleJobs {
     pub linux_aarch64: NamedJob,
@@ -36,18 +43,29 @@ impl ReleaseBundleJobs {
 }
 
 pub(crate) fn release() -> Workflow {
-    let bundle_mac = bundle_mac_preview();
-    let bundle_linux_x86_64 = bundle_linux_remote_server_preview(Arch::X86_64);
-    let bundle_linux_aarch64 = bundle_linux_remote_server_preview(Arch::AARCH64);
-    let publish =
-        publish_preview_release(&[&bundle_mac, &bundle_linux_x86_64, &bundle_linux_aarch64]);
+    let (validate_release_tag, valid_release_tag) = validate_release_tag();
+    let bundle_mac = bundle_mac_stable(&validate_release_tag, &valid_release_tag);
+    let bundle_linux_x86_64 =
+        bundle_linux_remote_server_stable(Arch::X86_64, &validate_release_tag, &valid_release_tag);
+    let bundle_linux_aarch64 =
+        bundle_linux_remote_server_stable(Arch::AARCH64, &validate_release_tag, &valid_release_tag);
+    let publish = publish_release(
+        &[
+            &validate_release_tag,
+            &bundle_mac,
+            &bundle_linux_x86_64,
+            &bundle_linux_aarch64,
+        ],
+        &valid_release_tag,
+    );
 
     named::workflow()
-        .on(Event::default().push(Push::default().tags(vec!["v*-pre".to_string()])))
+        .on(Event::default().push(Push::default().tags(vec!["v*.*.*".to_string()])))
         .permissions(Permissions::default().contents(Level::Write))
         .concurrency(vars::one_workflow_per_non_main_branch())
         .add_env(("CARGO_TERM_COLOR", "always"))
         .add_env(("RUST_BACKTRACE", "1"))
+        .add_job(validate_release_tag.name, validate_release_tag.job)
         .add_job(bundle_mac.name, bundle_mac.job)
         .add_job(bundle_linux_x86_64.name, bundle_linux_x86_64.job)
         .add_job(bundle_linux_aarch64.name, bundle_linux_aarch64.job)
@@ -63,15 +81,46 @@ fn download_workflow_artifacts() -> Step<Use> {
     .add_with(("path", "./artifacts/"))
 }
 
-fn bundle_mac_preview() -> NamedJob {
+fn validate_release_tag() -> (NamedJob, JobOutput) {
+    let step = release_tag_output_step();
+    let output = StepOutput::new(&step, "is_release_tag");
+
+    let job = Job::default()
+        .cond(Expression::new(DEFAULT_REPOSITORY_OWNER_GUARD))
+        .runs_on(runners::LINUX_SMALL)
+        .timeout_minutes(1u32)
+        .outputs([(output.name.to_owned(), output.to_string())])
+        .add_step(step);
+
+    let job = NamedJob {
+        name: "validate_release_tag".to_string(),
+        job,
+    };
+    let output = output.as_job_output(&job);
+
+    (job, output)
+}
+
+fn release_tag_output_step() -> Step<Run> {
+    named::bash(indoc! {r#"
+        if printf '%s\n' "$GITHUB_REF_NAME" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+          echo "is_release_tag=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "is_release_tag=false" >> "$GITHUB_OUTPUT"
+        fi
+    "#})
+    .id("validate-release-tag")
+}
+
+fn bundle_mac_stable(validate_release_tag: &NamedJob, valid_release_tag: &JobOutput) -> NamedJob {
     NamedJob {
-        name: "bundle_mac_preview".to_string(),
-        job: dependant_job(&[])
-            .with_repository_owner_guard()
+        name: "bundle_mac_stable".to_string(),
+        job: dependant_job(&[validate_release_tag])
+            .cond(stable_release_tag_guard(valid_release_tag))
             .runs_on(runners::MAC_DEFAULT)
             .timeout_minutes(360u32)
             .add_env(("CARGO_TARGET_DIR", "target"))
-            .add_env(("SUPERZET_RELEASE_CHANNEL", "preview"))
+            .add_env(("SUPERZET_RELEASE_CHANNEL", "stable"))
             .add_env(("SUPERZET_MACOS_CERTIFICATE", vars::MACOS_CERTIFICATE))
             .add_env((
                 "SUPERZET_MACOS_CERTIFICATE_PASSWORD",
@@ -103,7 +152,11 @@ fn bundle_mac_preview() -> NamedJob {
     }
 }
 
-fn bundle_linux_remote_server_preview(arch: Arch) -> NamedJob {
+fn bundle_linux_remote_server_stable(
+    arch: Arch,
+    validate_release_tag: &NamedJob,
+    valid_release_tag: &JobOutput,
+) -> NamedJob {
     let zig_version = "0.14.1";
     let remote_server_triple = match arch {
         Arch::X86_64 => "x86_64-unknown-linux-musl",
@@ -144,13 +197,13 @@ fn bundle_linux_remote_server_preview(arch: Arch) -> NamedJob {
     );
 
     NamedJob {
-        name: format!("bundle_linux_remote_server_preview_{arch}"),
-        job: dependant_job(&[])
-            .with_repository_owner_guard()
+        name: format!("bundle_linux_remote_server_stable_{arch}"),
+        job: dependant_job(&[validate_release_tag])
+            .cond(stable_release_tag_guard(valid_release_tag))
             .runs_on(arch.linux_bundler())
             .timeout_minutes(60u32)
             .envs(bundle_envs(Platform::Linux))
-            .add_env(("SUPERZET_RELEASE_CHANNEL", "preview"))
+            .add_env(("SUPERZET_RELEASE_CHANNEL", "stable"))
             .add_env(("CC", "clang-18"))
             .add_env(("CXX", "clang++-18"))
             .add_step(steps::checkout_repo())
@@ -160,7 +213,7 @@ fn bundle_linux_remote_server_preview(arch: Arch) -> NamedJob {
     }
 }
 
-fn publish_preview_release(deps: &[&NamedJob]) -> NamedJob {
+fn publish_release(deps: &[&NamedJob], valid_release_tag: &JobOutput) -> NamedJob {
     let publish_script = formatdoc!(
         r#"
         mkdir -p release-artifacts
@@ -173,7 +226,6 @@ fn publish_preview_release(deps: &[&NamedJob]) -> NamedJob {
           gh release create "$GITHUB_REF_NAME" \
             --repo "$GITHUB_REPOSITORY" \
             --title "$GITHUB_REF_NAME" \
-            --prerelease \
             --generate-notes
         fi
 
@@ -189,9 +241,9 @@ fn publish_preview_release(deps: &[&NamedJob]) -> NamedJob {
     );
 
     NamedJob {
-        name: "publish_preview_release".to_string(),
+        name: "publish_release".to_string(),
         job: dependant_job(deps)
-            .with_repository_owner_guard()
+            .cond(stable_release_tag_guard(valid_release_tag))
             .runs_on(runners::LINUX_SMALL)
             .timeout_minutes(30u32)
             .add_step(download_workflow_artifacts())

@@ -1,21 +1,15 @@
 #!/usr/bin/env bash
+set -euo pipefail
 
 channel="$1"
 
-query=""
-case $channel in
-  stable)
-    ;;
-  preview)
-    query="&preview=1"
-    ;;
-  nightly)
-    query="&nightly=1"
-    ;;
-  *)
-    echo "this must be run on either of stable|preview|nightly release branches" >&2
-    exit 1
-    ;;
-esac
+if [ "$channel" != "stable" ]; then
+  echo "this must be run with the stable release channel" >&2
+  exit 1
+fi
 
-curl -s "https://cloud.zed.dev/releases/$channel/latest/asset?asset=zed&os=macos&arch=aarch64" | jq -r .version
+releases_base_url="${SUPERZET_RELEASES_URL:-https://releases.nangman.ai}"
+releases_base_url="${releases_base_url%/}"
+
+curl -fsSL "${releases_base_url}/releases/${channel}/latest/asset?asset=superzet&os=macos&arch=aarch64" \
+  | jq -r .version

@@ -1,6 +1,8 @@
 #!/usr/bin/env node --redirect-warnings=/dev/null
 
 const { execFileSync } = require("child_process");
+const REPOSITORY = "currybab/superzet";
+const REPOSITORY_URL = `https://github.com/${REPOSITORY}`;
 
 main();
 
@@ -13,39 +15,31 @@ async function main() {
     process.argv.length != 4 ||
     parts.length != 3 ||
     parts.find((part) => isNaN(part)) != null ||
-    (channel != "stable" && channel != "preview")
+    channel != "stable"
   ) {
-    console.log("Usage: draft-release-notes <version> {stable|preview}");
+    console.log("Usage: draft-release-notes <version> stable");
     process.exit(1);
   }
 
-  // currently we can only draft notes for patch releases.
-  if (parts[2] === 0) {
-    process.exit(0);
-  }
-
-  let priorVersion = [parts[0], parts[1], parts[2] - 1].join(".");
-  let suffix = channel == "preview" ? "-pre" : "";
-  let [tag, priorTag] = [`v${version}${suffix}`, `v${priorVersion}${suffix}`];
+  let tag = `v${version}`;
+  let priorTag;
 
   try {
     execFileSync("rm", ["-rf", "target/shallow_clone"]);
     execFileSync("git", [
       "clone",
-      "https://github.com/zed-industries/zed",
+      REPOSITORY_URL,
       "target/shallow_clone",
       "--filter=tree:0",
       "--no-checkout",
       "--branch",
       tag,
-      "--depth",
-      100,
     ]);
+    execFileSync("git", ["-C", "target/shallow_clone", "fetch", "--tags", "origin"]);
     execFileSync("git", ["-C", "target/shallow_clone", "rev-parse", "--verify", tag]);
-    try {
-      execFileSync("git", ["-C", "target/shallow_clone", "rev-parse", "--verify", priorTag]);
-    } catch (e) {
-      console.error(`Prior tag ${priorTag} not found`);
+    priorTag = getPriorStableTag(tag);
+    if (!priorTag) {
+      console.error(`No prior stable tag found for ${tag}`);
       process.exit(0);
     }
   } catch (e) {
@@ -60,11 +54,11 @@ async function main() {
   let skipped = [];
 
   for (const commit of newCommits) {
-    let link = "https://github.com/zed-industries/zed/pull/" + commit.pr;
+    let link = `${REPOSITORY_URL}/pull/` + commit.pr;
     let notes = commit.releaseNotes;
     if (commit.pr == "") {
-      link = "https://github.com/zed-industries/zed/commits/" + commit.hash;
-    } else if (!notes.includes("zed-industries/zed/issues")) {
+      link = `${REPOSITORY_URL}/commits/` + commit.hash;
+    } else if (!notes.includes(`${REPOSITORY}/issues`)) {
       notes = notes + " ([#" + commit.pr + "](" + link + "))";
     }
 
@@ -78,11 +72,61 @@ async function main() {
   }
 
   if (releaseNotes.length === 0) {
-    const compareUrl = `https://github.com/zed-industries/zed/compare/${priorTag}...${tag}#commits_bucket`;
+    const compareUrl = `${REPOSITORY_URL}/compare/${priorTag}...${tag}#commits_bucket`;
     console.log(`No public-facing changes in this release. [View the commits](${compareUrl}).\n`);
   } else {
     console.log(releaseNotes.join("\n") + "\n");
   }
+}
+
+function getPriorStableTag(currentTag) {
+  let currentVersion = parseStableVersion(currentTag);
+  let stableTags = execFileSync(
+    "git",
+    ["-C", "target/shallow_clone", "tag", "--list", "v*.*.*"],
+    { encoding: "utf8" },
+  )
+    .split("\n")
+    .map((tag) => tag.trim())
+    .filter((tag) => tag.length > 0)
+    .filter((tag) => isStableTag(tag))
+    .sort(compareStableTagsDescending);
+
+  return (
+    stableTags.find((tag) => compareStableVersions(parseStableVersion(tag), currentVersion) < 0) ||
+    null
+  );
+}
+
+function isStableTag(tag) {
+  return /^v\d+\.\d+\.\d+$/.test(tag);
+}
+
+function parseStableVersion(tag) {
+  let match = tag.match(/^v(\d+)\.(\d+)\.(\d+)$/);
+  if (!match) {
+    throw new Error(`Invalid stable tag: ${tag}`);
+  }
+
+  return {
+    major: Number(match[1]),
+    minor: Number(match[2]),
+    patch: Number(match[3]),
+  };
+}
+
+function compareStableVersions(left, right) {
+  if (left.major !== right.major) {
+    return left.major - right.major;
+  }
+  if (left.minor !== right.minor) {
+    return left.minor - right.minor;
+  }
+  return left.patch - right.patch;
+}
+
+function compareStableTagsDescending(left, right) {
+  return compareStableVersions(parseStableVersion(right), parseStableVersion(left));
 }
 
 function getCommits(oldTag, newTag) {

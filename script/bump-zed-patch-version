@@ -2,17 +2,9 @@
 
 channel=$(cat crates/zed/RELEASE_CHANNEL)
 
-tag_suffix=""
-case $channel in
-  stable)
-    ;;
-  preview)
-    tag_suffix="-pre"
-    ;;
-  *)
-    echo "this must be run on either of stable|preview release branches" >&2
-    exit 1
-    ;;
-esac
+if [ "$channel" != "stable" ]; then
+  echo "this must be run on the stable release branch" >&2
+  exit 1
+fi
 
-exec script/lib/bump-version.sh zed v "$tag_suffix" patch
+exec script/lib/bump-version.sh superzet v "" patch

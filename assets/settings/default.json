@@ -2401,16 +2401,6 @@
   // The server to connect to. If the environment variable
   // SUPERZET_SERVER_URL or ZED_SERVER_URL is set, it will override this setting.
   "server_url": "https://superzet.dev",
-  // Settings overrides to use when using superzet preview.
-  // Mostly useful for developers who are managing multiple instances of superzet.
-  "preview": {
-    // "theme": "Andromeda"
-  },
-  // Settings overrides to use when using superzet nightly.
-  // Mostly useful for developers who are managing multiple instances of superzet.
-  "nightly": {
-    // "theme": "Andromeda"
-  },
   // Settings overrides to use when using superzet stable.
   // Mostly useful for developers who are managing multiple instances of superzet.
   "stable": {

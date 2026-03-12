@@ -224,8 +224,8 @@ impl WslRemoteConnection {
         }
 
         let wanted_version = match release_channel {
-            ReleaseChannel::Nightly | ReleaseChannel::Dev => None,
-            _ => Some(cx.update(|cx| AppVersion::global(cx))),
+            ReleaseChannel::Dev => None,
+            ReleaseChannel::Stable => Some(cx.update(|cx| AppVersion::global(cx))),
         };
 
         let src_path = delegate

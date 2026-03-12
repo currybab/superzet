@@ -695,14 +695,13 @@ impl SshRemoteConnection {
         }
 
         let wanted_version = cx.update(|cx| match release_channel {
-            ReleaseChannel::Nightly => Ok(None),
             ReleaseChannel::Dev => {
                 anyhow::bail!(
                     "SUPERZET_BUILD_REMOTE_SERVER is not set and no remote server exists at ({:?})",
                     dst_path
                 )
             }
-            _ => Ok(Some(AppVersion::global(cx))),
+            ReleaseChannel::Stable => Ok(Some(AppVersion::global(cx))),
         })?;
 
         let tmp_path_compressed = remote_server_dir_relative().join(

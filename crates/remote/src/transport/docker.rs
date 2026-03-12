@@ -164,7 +164,7 @@ impl DockerExecConnection {
         release_channel: ReleaseChannel,
         version: SemanticVersion,
         remote_dir_for_server: &str,
-        commit: Option<AppCommitSha>,
+        _commit: Option<AppCommitSha>,
         cx: &mut AsyncApp,
     ) -> Result<Arc<RelPath>> {
         let remote_platform = self
@@ -172,12 +172,8 @@ impl DockerExecConnection {
             .context("No remote platform defined; cannot proceed.")?;
 
         let version_str = match release_channel {
-            ReleaseChannel::Nightly => {
-                let commit = commit.map(|s| s.full()).unwrap_or_default();
-                format!("{}-{}", version, commit)
-            }
             ReleaseChannel::Dev => "build".to_string(),
-            _ => version.to_string(),
+            ReleaseChannel::Stable => version.to_string(),
         };
         let binary_name = remote_server_binary_name(
             release_channel.dev_name(),
@@ -231,14 +227,13 @@ impl DockerExecConnection {
         }
 
         let wanted_version = cx.update(|cx| match release_channel {
-            ReleaseChannel::Nightly => Ok(None),
             ReleaseChannel::Dev => {
                 anyhow::bail!(
                     "SUPERZET_BUILD_REMOTE_SERVER is not set and no remote server exists at ({:?})",
                     dst_path
                 )
             }
-            _ => Ok(Some(AppVersion::global(cx))),
+            ReleaseChannel::Stable => Ok(Some(AppVersion::global(cx))),
         })?;
 
         let tmp_path_gz = paths::remote_server_dir_relative().join(

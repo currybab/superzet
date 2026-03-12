@@ -40,11 +40,11 @@ jobs:
       run: ./script/download-wasi-sdk
     - name: ./script/bundle-linux
       run: ./script/bundle-linux
-    - name: '@actions/upload-artifact zed-linux-aarch64.tar.gz'
+    - name: '@actions/upload-artifact superzet-linux-aarch64.tar.gz'
       uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
       with:
-        name: zed-linux-aarch64.tar.gz
-        path: target/release/zed-linux-aarch64.tar.gz
+        name: superzet-linux-aarch64.tar.gz
+        path: target/release/superzet-linux-aarch64.tar.gz
         if-no-files-found: error
     - name: '@actions/upload-artifact superzet-remote-server-linux-aarch64.gz'
       uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
@@ -83,11 +83,11 @@ jobs:
       run: ./script/download-wasi-sdk
     - name: ./script/bundle-linux
       run: ./script/bundle-linux
-    - name: '@actions/upload-artifact zed-linux-x86_64.tar.gz'
+    - name: '@actions/upload-artifact superzet-linux-x86_64.tar.gz'
       uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
       with:
-        name: zed-linux-x86_64.tar.gz
-        path: target/release/zed-linux-x86_64.tar.gz
+        name: superzet-linux-x86_64.tar.gz
+        path: target/release/superzet-linux-x86_64.tar.gz
         if-no-files-found: error
     - name: '@actions/upload-artifact superzet-remote-server-linux-x86_64.gz'
       uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
@@ -233,11 +233,11 @@ jobs:
       run: script/bundle-windows.ps1 -Architecture aarch64
       shell: pwsh
       working-directory: ${{ env.ZED_WORKSPACE }}
-    - name: '@actions/upload-artifact Zed-aarch64.exe'
+    - name: '@actions/upload-artifact superzet-aarch64.exe'
       uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
       with:
-        name: Zed-aarch64.exe
-        path: target/Zed-aarch64.exe
+        name: superzet-aarch64.exe
+        path: target/superzet-aarch64.exe
         if-no-files-found: error
     - name: '@actions/upload-artifact superzet-remote-server-windows-aarch64.zip'
       uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
@@ -279,11 +279,11 @@ jobs:
       run: script/bundle-windows.ps1 -Architecture x86_64
       shell: pwsh
       working-directory: ${{ env.ZED_WORKSPACE }}
-    - name: '@actions/upload-artifact Zed-x86_64.exe'
+    - name: '@actions/upload-artifact superzet-x86_64.exe'
       uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
       with:
-        name: Zed-x86_64.exe
-        path: target/Zed-x86_64.exe
+        name: superzet-x86_64.exe
+        path: target/superzet-x86_64.exe
         if-no-files-found: error
     - name: '@actions/upload-artifact superzet-remote-server-windows-x86_64.zip'
       uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4

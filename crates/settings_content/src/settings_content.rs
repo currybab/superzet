@@ -246,7 +246,7 @@ impl RootUserSettings for UserSettingsContent {
 settings_overrides! {
     #[with_fallible_options]
     #[derive(Debug, Default, PartialEq, Clone, Serialize, Deserialize, JsonSchema, MergeFrom)]
-    pub struct ReleaseChannelOverrides { dev, nightly, preview, stable }
+    pub struct ReleaseChannelOverrides { dev, stable }
 }
 
 settings_overrides! {

@@ -4,6 +4,7 @@ use std::env;
 use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, OnceLock};
 
+use release_channel::RELEASE_CHANNEL;
 pub use util::paths::home_dir;
 use util::rel_path::RelPath;
 
@@ -29,6 +30,19 @@ static CURRENT_DATA_DIR: OnceLock<PathBuf> = OnceLock::new();
 /// On Linux/FreeBSD, this is `$XDG_CONFIG_HOME/zed`.
 /// On Windows, this is `%APPDATA%\Zed`.
 static CONFIG_DIR: OnceLock<PathBuf> = OnceLock::new();
+
+fn namespaced_app_dir_name(release_channel_name: &str) -> String {
+    if release_channel_name == "stable" {
+        "superzet".to_string()
+    } else {
+        format!("superzet-{release_channel_name}")
+    }
+}
+
+fn app_dir_name() -> &'static str {
+    static APP_DIR_NAME: OnceLock<String> = OnceLock::new();
+    APP_DIR_NAME.get_or_init(|| namespaced_app_dir_name(RELEASE_CHANNEL.dev_name()))
+}
 
 /// Returns the relative path to the Superzet remote server directory on the ssh host.
 pub fn remote_server_dir_relative() -> &'static RelPath {
@@ -85,16 +99,16 @@ pub fn config_dir() -> &'static PathBuf {
         } else if cfg!(target_os = "windows") {
             dirs::config_dir()
                 .expect("failed to determine RoamingAppData directory")
-                .join("superzet")
+                .join(app_dir_name())
         } else if cfg!(any(target_os = "linux", target_os = "freebsd")) {
             if let Ok(flatpak_xdg_config) = std::env::var("FLATPAK_XDG_CONFIG_HOME") {
                 flatpak_xdg_config.into()
             } else {
                 dirs::config_dir().expect("failed to determine XDG_CONFIG_HOME directory")
             }
-            .join("superzet")
+            .join(app_dir_name())
         } else {
-            home_dir().join(".config").join("superzet")
+            home_dir().join(".config").join(app_dir_name())
         }
     })
 }
@@ -105,18 +119,20 @@ pub fn data_dir() -> &'static PathBuf {
         if let Some(custom_dir) = CUSTOM_DATA_DIR.get() {
             custom_dir.clone()
         } else if cfg!(target_os = "macos") {
-            home_dir().join("Library/Application Support/superzet")
+            home_dir()
+                .join("Library/Application Support")
+                .join(app_dir_name())
         } else if cfg!(any(target_os = "linux", target_os = "freebsd")) {
             if let Ok(flatpak_xdg_data) = std::env::var("FLATPAK_XDG_DATA_HOME") {
                 flatpak_xdg_data.into()
             } else {
                 dirs::data_local_dir().expect("failed to determine XDG_DATA_HOME directory")
             }
-            .join("superzet")
+            .join(app_dir_name())
         } else if cfg!(target_os = "windows") {
             dirs::data_local_dir()
                 .expect("failed to determine LocalAppData directory")
-                .join("superzet")
+                .join(app_dir_name())
         } else {
             config_dir().clone() // Fallback
         }
@@ -127,7 +143,7 @@ pub fn state_dir() -> &'static PathBuf {
     static STATE_DIR: OnceLock<PathBuf> = OnceLock::new();
     STATE_DIR.get_or_init(|| {
         if cfg!(target_os = "macos") {
-            return home_dir().join(".local").join("state").join("superzet");
+            return home_dir().join(".local").join("state").join(app_dir_name());
         }
 
         if cfg!(any(target_os = "linux", target_os = "freebsd")) {
@@ -136,12 +152,12 @@ pub fn state_dir() -> &'static PathBuf {
             } else {
                 dirs::state_dir().expect("failed to determine XDG_STATE_HOME directory")
             }
-            .join("superzet");
+            .join(app_dir_name());
         } else {
             // Windows
             return dirs::data_local_dir()
                 .expect("failed to determine LocalAppData directory")
-                .join("superzet");
+                .join(app_dir_name());
         }
     })
 }
@@ -153,13 +169,13 @@ pub fn temp_dir() -> &'static PathBuf {
         if cfg!(target_os = "macos") {
             return dirs::cache_dir()
                 .expect("failed to determine cachesDirectory directory")
-                .join("superzet");
+                .join(app_dir_name());
         }
 
         if cfg!(target_os = "windows") {
             return dirs::cache_dir()
                 .expect("failed to determine LocalAppData directory")
-                .join("superzet");
+                .join(app_dir_name());
         }
 
         if cfg!(any(target_os = "linux", target_os = "freebsd")) {
@@ -168,10 +184,10 @@ pub fn temp_dir() -> &'static PathBuf {
             } else {
                 dirs::cache_dir().expect("failed to determine XDG_CACHE_HOME directory")
             }
-            .join("superzet");
+            .join(app_dir_name());
         }
 
-        home_dir().join(".cache").join("superzet")
+        home_dir().join(".cache").join(app_dir_name())
     })
 }
 
@@ -186,7 +202,7 @@ pub fn logs_dir() -> &'static PathBuf {
     static LOGS_DIR: OnceLock<PathBuf> = OnceLock::new();
     LOGS_DIR.get_or_init(|| {
         if cfg!(target_os = "macos") {
-            home_dir().join("Library/Logs/superzet")
+            home_dir().join("Library/Logs").join(app_dir_name())
         } else {
             data_dir().join("logs")
         }
@@ -595,6 +611,16 @@ pub fn global_gitignore_path() -> Option<PathBuf> {
 mod tests {
     use super::*;
     use std::path::Path;
+
+    #[test]
+    fn namespaced_app_dir_name_keeps_stable_unsuffixed() {
+        assert_eq!(namespaced_app_dir_name("stable"), "superzet");
+    }
+
+    #[test]
+    fn namespaced_app_dir_name_suffixes_non_stable_channels() {
+        assert_eq!(namespaced_app_dir_name("dev"), "superzet-dev");
+    }
 
     #[test]
     fn remote_server_paths_use_superzet_namespaces() {

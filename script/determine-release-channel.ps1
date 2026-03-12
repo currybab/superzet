@@ -10,7 +10,7 @@ if (-not $env:GITHUB_REF) {
     exit 1
 }
 
-$version = & "script/get-crate-version.ps1" "zed"
+$version = & "script/get-crate-version.ps1" "superzet"
 $channel = Get-Content "crates/zed/RELEASE_CHANNEL"
 
 Write-Host "Publishing version: $version on release channel $channel"
@@ -21,9 +21,6 @@ $expectedTagName = ""
 switch ($channel) {
     "stable" {
         $expectedTagName = "v$version"
-    }
-    "preview" {
-        $expectedTagName = "v$version-pre"
     }
     default {
         Write-Error "can't publish a release on channel $channel"

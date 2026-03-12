@@ -186,16 +186,19 @@ fn main() {
             }
         }
 
-        let release_channel = option_env!("RELEASE_CHANNEL").unwrap_or("dev");
+        let release_channel = option_env!("SUPERZET_RELEASE_CHANNEL")
+            .or(option_env!("ZED_RELEASE_CHANNEL"))
+            .or(option_env!("RELEASE_CHANNEL"))
+            .unwrap_or("dev");
         let icon = match release_channel {
-            "stable" => "resources/windows/app-icon.ico",
-            "preview" => "resources/windows/app-icon-nightly.ico",
-            "nightly" => "resources/windows/app-icon-nightly.ico",
-            "dev" => "resources/windows/app-icon-dev.ico",
-            _ => "resources/windows/app-icon-dev.ico",
+            "stable" => "resources/windows/app-icon-nightly.ico",
+            "dev" => "resources/windows/app-icon.ico",
+            _ => "resources/windows/app-icon.ico",
         };
         let icon = std::path::Path::new(icon);
 
+        println!("cargo:rerun-if-env-changed=SUPERZET_RELEASE_CHANNEL");
+        println!("cargo:rerun-if-env-changed=ZED_RELEASE_CHANNEL");
         println!("cargo:rerun-if-env-changed=RELEASE_CHANNEL");
         println!("cargo:rerun-if-changed={}", icon.display());
 

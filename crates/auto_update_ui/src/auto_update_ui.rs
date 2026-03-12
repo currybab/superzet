@@ -71,10 +71,7 @@ fn view_release_notes_locally(
 ) {
     let release_channel = ReleaseChannel::global(cx);
 
-    if matches!(
-        release_channel,
-        ReleaseChannel::Nightly | ReleaseChannel::Dev
-    ) {
+    if matches!(release_channel, ReleaseChannel::Dev) {
         if let Some(url) = release_notes_url(cx) {
             cx.open_url(&url);
         }
@@ -257,7 +254,7 @@ pub fn notify_if_app_was_updated(cx: &mut App) {
         return;
     };
 
-    if let ReleaseChannel::Nightly = ReleaseChannel::global(cx) {
+    if let ReleaseChannel::Dev = ReleaseChannel::global(cx) {
         return;
     }
 

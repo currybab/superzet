@@ -17,4 +17,5 @@ path = "src/paths.rs"
 [dependencies]
 dirs.workspace = true
 ignore.workspace = true
+release_channel.workspace = true
 util.workspace = true

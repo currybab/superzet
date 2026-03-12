@@ -15,9 +15,16 @@ fn env_flag(primary: &str, legacy: &str, predicate: impl Fn(&str) -> bool) -> bo
     env_var(primary, legacy).as_deref().is_some_and(predicate)
 }
 
-/// stable | dev | nightly | preview
+fn build_release_channel_name() -> Option<&'static str> {
+    option_env!("SUPERZET_RELEASE_CHANNEL")
+        .or(option_env!("ZED_RELEASE_CHANNEL"))
+        .or(option_env!("RELEASE_CHANNEL"))
+}
+
+/// stable | dev
 pub static RELEASE_CHANNEL_NAME: LazyLock<String> = LazyLock::new(|| {
     resolved_release_channel_name(
+        build_release_channel_name(),
         env_var("SUPERZET_RELEASE_CHANNEL", "ZED_RELEASE_CHANNEL"),
         include_str!("../../zed/RELEASE_CHANNEL").trim(),
         cfg!(debug_assertions),
@@ -37,8 +44,6 @@ pub static RELEASE_CHANNEL: LazyLock<ReleaseChannel> =
 pub fn app_identifier() -> &'static str {
     match *RELEASE_CHANNEL {
         ReleaseChannel::Dev => "superzet-dev",
-        ReleaseChannel::Nightly => "superzet-nightly",
-        ReleaseChannel::Preview => "superzet-preview",
         ReleaseChannel::Stable => "superzet-stable",
     }
 }
@@ -138,12 +143,6 @@ pub enum ReleaseChannel {
     #[default]
     Dev,
 
-    /// The Nightly release channel.
-    Nightly,
-
-    /// The Preview release channel.
-    Preview,
-
     /// The Stable release channel.
     Stable,
 }
@@ -185,8 +184,6 @@ impl ReleaseChannel {
     pub fn display_name(&self) -> &'static str {
         match self {
             ReleaseChannel::Dev => "superzet dev",
-            ReleaseChannel::Nightly => "superzet nightly",
-            ReleaseChannel::Preview => "superzet preview",
             ReleaseChannel::Stable => "superzet",
         }
     }
@@ -195,8 +192,6 @@ impl ReleaseChannel {
     pub fn dev_name(&self) -> &'static str {
         match self {
             ReleaseChannel::Dev => "dev",
-            ReleaseChannel::Nightly => "nightly",
-            ReleaseChannel::Preview => "preview",
             ReleaseChannel::Stable => "stable",
         }
     }
@@ -207,8 +202,6 @@ impl ReleaseChannel {
     pub fn app_id(&self) -> &'static str {
         match self {
             ReleaseChannel::Dev => "ai.nangman.superzet-dev",
-            ReleaseChannel::Nightly => "ai.nangman.superzet-nightly",
-            ReleaseChannel::Preview => "ai.nangman.superzet-preview",
             ReleaseChannel::Stable => "ai.nangman.superzet",
         }
     }
@@ -217,8 +210,6 @@ impl ReleaseChannel {
     pub fn release_query_param(&self) -> Option<&'static str> {
         match self {
             Self::Dev => None,
-            Self::Nightly => Some("nightly=1"),
-            Self::Preview => Some("preview=1"),
             Self::Stable => None,
         }
     }
@@ -234,8 +225,6 @@ impl FromStr for ReleaseChannel {
     fn from_str(channel: &str) -> Result<Self, Self::Err> {
         Ok(match channel {
             "dev" => ReleaseChannel::Dev,
-            "nightly" => ReleaseChannel::Nightly,
-            "preview" => ReleaseChannel::Preview,
             "stable" => ReleaseChannel::Stable,
             _ => return Err(InvalidReleaseChannel),
         })
@@ -243,15 +232,20 @@ impl FromStr for ReleaseChannel {
 }
 
 fn resolved_release_channel_name(
+    build_release_channel: Option<&str>,
     env_release_channel: Option<String>,
     default_release_channel: &str,
     debug_assertions_enabled: bool,
     is_zed_terminal: bool,
 ) -> String {
     if debug_assertions_enabled && !is_zed_terminal {
-        env_release_channel.unwrap_or_else(|| default_release_channel.to_string())
+        env_release_channel
+            .or_else(|| build_release_channel.map(ToOwned::to_owned))
+            .unwrap_or_else(|| default_release_channel.to_string())
     } else {
-        default_release_channel.to_string()
+        build_release_channel
+            .unwrap_or(default_release_channel)
+            .to_string()
     }
 }
 
@@ -260,25 +254,51 @@ mod tests {
     use super::resolved_release_channel_name;
 
     #[test]
-    fn debug_builds_use_repo_default_inside_zed_terminal() {
+    fn debug_builds_use_build_channel_inside_zed_terminal() {
         assert_eq!(
-            resolved_release_channel_name(Some("nightly".to_string()), "dev", true, true),
+            resolved_release_channel_name(
+                Some("stable"),
+                Some("dev".to_string()),
+                "dev",
+                true,
+                true
+            ),
+            "stable"
+        );
+    }
+
+    #[test]
+    fn debug_builds_still_allow_runtime_override_outside_zed_terminal() {
+        assert_eq!(
+            resolved_release_channel_name(
+                Some("stable"),
+                Some("dev".to_string()),
+                "dev",
+                true,
+                false
+            ),
             "dev"
         );
     }
 
     #[test]
-    fn debug_builds_still_allow_explicit_channel_outside_zed_terminal() {
+    fn non_debug_builds_use_build_channel() {
         assert_eq!(
-            resolved_release_channel_name(Some("nightly".to_string()), "dev", true, false),
-            "nightly"
+            resolved_release_channel_name(
+                Some("stable"),
+                Some("dev".to_string()),
+                "stable",
+                false,
+                false
+            ),
+            "stable"
         );
     }
 
     #[test]
-    fn non_debug_builds_ignore_runtime_override() {
+    fn non_debug_builds_ignore_runtime_override_without_build_channel() {
         assert_eq!(
-            resolved_release_channel_name(Some("nightly".to_string()), "stable", false, false),
+            resolved_release_channel_name(None, Some("dev".to_string()), "stable", false, false),
             "stable"
         );
     }

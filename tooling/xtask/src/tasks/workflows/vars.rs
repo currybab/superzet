@@ -344,10 +344,10 @@ impl serde::Serialize for WorkflowSecret {
 pub mod assets {
     pub const MAC_AARCH64: &str = "superzet-aarch64.dmg";
     pub const MAC_X86_64: &str = "superzet-x86_64.dmg";
-    pub const LINUX_AARCH64: &str = "zed-linux-aarch64.tar.gz";
-    pub const LINUX_X86_64: &str = "zed-linux-x86_64.tar.gz";
-    pub const WINDOWS_X86_64: &str = "Zed-x86_64.exe";
-    pub const WINDOWS_AARCH64: &str = "Zed-aarch64.exe";
+    pub const LINUX_AARCH64: &str = "superzet-linux-aarch64.tar.gz";
+    pub const LINUX_X86_64: &str = "superzet-linux-x86_64.tar.gz";
+    pub const WINDOWS_X86_64: &str = "superzet-x86_64.exe";
+    pub const WINDOWS_AARCH64: &str = "superzet-aarch64.exe";
 
     pub const REMOTE_SERVER_MAC_AARCH64: &str = "superzet-remote-server-macos-aarch64.gz";
     pub const REMOTE_SERVER_MAC_X86_64: &str = "superzet-remote-server-macos-x86_64.gz";

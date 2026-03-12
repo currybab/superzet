@@ -7,16 +7,33 @@ env:
 on:
   push:
     tags:
-    - v*-pre
+    - v*.*.*
 permissions:
   contents: write
 jobs:
-  bundle_mac_preview:
+  validate_release_tag:
     if: github.repository_owner == 'currybab'
+    runs-on: ubuntu-24.04
+    steps:
+    - id: validate-release-tag
+      name: release::release_tag_output_step
+      run: |
+        if printf '%s\n' "$GITHUB_REF_NAME" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+          echo "is_release_tag=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "is_release_tag=false" >> "$GITHUB_OUTPUT"
+        fi
+    outputs:
+      is_release_tag: ${{ steps.validate-release-tag.outputs.is_release_tag }}
+    timeout-minutes: 1
+  bundle_mac_stable:
+    needs:
+    - validate_release_tag
+    if: github.repository_owner == 'currybab' && needs.validate_release_tag.outputs.is_release_tag == 'true'
     runs-on: macos-latest
     env:
       CARGO_TARGET_DIR: target
-      SUPERZET_RELEASE_CHANNEL: preview
+      SUPERZET_RELEASE_CHANNEL: stable
       SUPERZET_MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
       SUPERZET_MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
       SUPERZET_APPLE_NOTARIZATION_KEY: ${{ secrets.APPLE_NOTARIZATION_KEY }}
@@ -34,7 +51,7 @@ jobs:
         node-version: '20'
     - name: steps::clear_target_dir_if_large
       run: ./script/clear-target-dir-if-larger-than 300
-    - name: release::bundle_mac_preview
+    - name: release::bundle_mac_stable
       run: ./script/bundle-mac aarch64-apple-darwin
     - name: '@actions/upload-artifact superzet-aarch64.dmg'
       uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
@@ -43,8 +60,10 @@ jobs:
         path: target/aarch64-apple-darwin/release/superzet-aarch64.dmg
         if-no-files-found: error
     timeout-minutes: 360
-  bundle_linux_remote_server_preview_x86_64:
-    if: github.repository_owner == 'currybab'
+  bundle_linux_remote_server_stable_x86_64:
+    needs:
+    - validate_release_tag
+    if: github.repository_owner == 'currybab' && needs.validate_release_tag.outputs.is_release_tag == 'true'
     runs-on: ubuntu-24.04
     env:
       CARGO_INCREMENTAL: 0
@@ -52,7 +71,7 @@ jobs:
       SUPERZET_MINIDUMP_ENDPOINT: ${{ secrets.ZED_SENTRY_MINIDUMP_ENDPOINT }}
       ZED_CLIENT_CHECKSUM_SEED: ${{ secrets.ZED_CLIENT_CHECKSUM_SEED }}
       ZED_MINIDUMP_ENDPOINT: ${{ secrets.ZED_SENTRY_MINIDUMP_ENDPOINT }}
-      SUPERZET_RELEASE_CHANNEL: preview
+      SUPERZET_RELEASE_CHANNEL: stable
       CC: clang-18
       CXX: clang++-18
     steps:
@@ -66,7 +85,7 @@ jobs:
       run: ./script/install-mold
     - name: steps::download_wasi_sdk
       run: ./script/download-wasi-sdk
-    - name: release::bundle_linux_remote_server_preview
+    - name: release::bundle_linux_remote_server_stable
       run: |
         if ! command -v zig >/dev/null 2>&1; then
           case "$(uname -m)" in
@@ -97,8 +116,10 @@ jobs:
         path: target/superzet-remote-server-linux-x86_64.gz
         if-no-files-found: error
     timeout-minutes: 60
-  bundle_linux_remote_server_preview_aarch64:
-    if: github.repository_owner == 'currybab'
+  bundle_linux_remote_server_stable_aarch64:
+    needs:
+    - validate_release_tag
+    if: github.repository_owner == 'currybab' && needs.validate_release_tag.outputs.is_release_tag == 'true'
     runs-on: ubuntu-24.04-arm
     env:
       CARGO_INCREMENTAL: 0
@@ -106,7 +127,7 @@ jobs:
       SUPERZET_MINIDUMP_ENDPOINT: ${{ secrets.ZED_SENTRY_MINIDUMP_ENDPOINT }}
       ZED_CLIENT_CHECKSUM_SEED: ${{ secrets.ZED_CLIENT_CHECKSUM_SEED }}
       ZED_MINIDUMP_ENDPOINT: ${{ secrets.ZED_SENTRY_MINIDUMP_ENDPOINT }}
-      SUPERZET_RELEASE_CHANNEL: preview
+      SUPERZET_RELEASE_CHANNEL: stable
       CC: clang-18
       CXX: clang++-18
     steps:
@@ -120,7 +141,7 @@ jobs:
       run: ./script/install-mold
     - name: steps::download_wasi_sdk
       run: ./script/download-wasi-sdk
-    - name: release::bundle_linux_remote_server_preview
+    - name: release::bundle_linux_remote_server_stable
       run: |
         if ! command -v zig >/dev/null 2>&1; then
           case "$(uname -m)" in
@@ -151,12 +172,13 @@ jobs:
         path: target/superzet-remote-server-linux-aarch64.gz
         if-no-files-found: error
     timeout-minutes: 60
-  publish_preview_release:
+  publish_release:
     needs:
-    - bundle_mac_preview
-    - bundle_linux_remote_server_preview_x86_64
-    - bundle_linux_remote_server_preview_aarch64
-    if: github.repository_owner == 'currybab'
+    - validate_release_tag
+    - bundle_mac_stable
+    - bundle_linux_remote_server_stable_x86_64
+    - bundle_linux_remote_server_stable_aarch64
+    if: github.repository_owner == 'currybab' && needs.validate_release_tag.outputs.is_release_tag == 'true'
     runs-on: ubuntu-24.04
     steps:
     - name: release::download_workflow_artifacts
@@ -165,7 +187,7 @@ jobs:
         path: ./artifacts/
     - name: ls -lR ./artifacts
       run: ls -lR ./artifacts
-    - name: release::publish_preview_release
+    - name: release::publish_release
       run: |
         mkdir -p release-artifacts
         cp "./artifacts/superzet-aarch64.dmg/superzet-aarch64.dmg" "release-artifacts/superzet-aarch64.dmg"
@@ -177,7 +199,6 @@ jobs:
           gh release create "$GITHUB_REF_NAME" \
             --repo "$GITHUB_REPOSITORY" \
             --title "$GITHUB_REF_NAME" \
-            --prerelease \
             --generate-notes
         fi
 

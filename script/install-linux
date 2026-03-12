@@ -5,18 +5,21 @@ set -euxo pipefail
 if [[ $# -gt 0 ]]; then
   echo "
   Usage: ${0##*/}
-  Builds and installs zed onto your system into ~/.local, making it available as ~/.local/bin/zed.
+  Builds and installs superzet onto your system into ~/.local, making it available as ~/.local/bin/superzet.
 
   Before running this you should ensure you have all the build dependencies installed with `./script/linux`.
   "
   exit 1
 fi
-export ZED_CHANNEL=$(<crates/zed/RELEASE_CHANNEL)
-export ZED_UPDATE_EXPLANATION="You need to fetch and rebuild zed in $(pwd)"
+export SUPERZET_CHANNEL=$(<crates/zed/RELEASE_CHANNEL)
+export ZED_CHANNEL="$SUPERZET_CHANNEL"
+export SUPERZET_UPDATE_EXPLANATION="You need to fetch and rebuild superzet in $(pwd)"
+export ZED_UPDATE_EXPLANATION="$SUPERZET_UPDATE_EXPLANATION"
 script/bundle-linux
 
 arch="$(uname -m)"
 commit=$(git rev-parse HEAD | cut -c 1-7)
-archive="zed-linux-${arch}.tar.gz"
-export ZED_BUNDLE_PATH="${CARGO_TARGET_DIR:-target}/release/${archive}"
+archive="superzet-linux-${arch}.tar.gz"
+export SUPERZET_BUNDLE_PATH="${CARGO_TARGET_DIR:-target}/release/${archive}"
+export ZED_BUNDLE_PATH="$SUPERZET_BUNDLE_PATH"
 script/install.sh

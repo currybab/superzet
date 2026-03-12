@@ -1,36 +1,79 @@
 #!/usr/bin/env sh
 set -eu
 
-# Downloads a tarball from https://zed.dev/releases and unpacks it
-# into ~/.local/. If you'd prefer to do this manually, instructions are at
-# https://zed.dev/docs/linux.
+bundle_basename() {
+    case "$channel" in
+        stable)
+            echo "superzet"
+            ;;
+        dev)
+            echo "superzet-dev"
+            ;;
+        *)
+            echo "Unsupported release channel: $channel" >&2
+            exit 1
+            ;;
+    esac
+}
+
+linux_app_id() {
+    case "$channel" in
+        stable)
+            echo "ai.nangman.superzet"
+            ;;
+        dev)
+            echo "ai.nangman.superzet-dev"
+            ;;
+        *)
+            echo "Unsupported release channel: $channel" >&2
+            exit 1
+            ;;
+    esac
+}
+
+download() {
+    if command -v curl >/dev/null 2>&1; then
+        command curl -fsSL "$@"
+    elif command -v wget >/dev/null 2>&1; then
+        wget -O- "$@"
+    else
+        echo "Could not find 'curl' or 'wget' in your path"
+        exit 1
+    fi
+}
 
 main() {
     platform="$(uname -s)"
     arch="$(uname -m)"
-    channel="${ZED_CHANNEL:-stable}"
-    ZED_VERSION="${ZED_VERSION:-latest}"
-    # Use TMPDIR if available (for environments with non-standard temp directories)
-    if [ -n "${TMPDIR:-}" ] && [ -d "${TMPDIR}" ]; then
-        temp="$(mktemp -d "$TMPDIR/zed-XXXXXX")"
-    else
-        temp="$(mktemp -d "/tmp/zed-XXXXXX")"
-    fi
+    channel="${SUPERZET_CHANNEL:-${ZED_CHANNEL:-stable}}"
+    releases_base_url="${SUPERZET_RELEASES_URL:-https://releases.nangman.ai}"
+    releases_base_url="${releases_base_url%/}"
+    bundle_path="${SUPERZET_BUNDLE_PATH:-${ZED_BUNDLE_PATH:-}}"
 
-    if [ "$platform" = "Darwin" ]; then
-        platform="macos"
-    elif [ "$platform" = "Linux" ]; then
-        platform="linux"
-    else
-        echo "Unsupported platform $platform"
-        exit 1
-    fi
+    case "$platform" in
+        Darwin)
+            platform="macos"
+            ;;
+        Linux)
+            platform="linux"
+            ;;
+        *)
+            echo "Unsupported platform $platform"
+            exit 1
+            ;;
+    esac
 
     case "$platform-$arch" in
-        macos-arm64* | linux-arm64* | linux-armhf | linux-aarch64)
+        macos-arm64*)
             arch="aarch64"
             ;;
-        macos-x86* | linux-x86* | linux-i686*)
+        macos-x86*)
+            arch="x86_64"
+            ;;
+        linux-arm64* | linux-armhf | linux-aarch64)
+            arch="aarch64"
+            ;;
+        linux-x86* | linux-i686*)
             arch="x86_64"
             ;;
         *)
@@ -39,25 +82,18 @@ main() {
             ;;
     esac
 
-    if command -v curl >/dev/null 2>&1; then
-        curl () {
-            command curl -fL "$@"
-        }
-    elif command -v wget >/dev/null 2>&1; then
-        curl () {
-            wget -O- "$@"
-        }
+    if [ -n "${TMPDIR:-}" ] && [ -d "${TMPDIR}" ]; then
+        temp_dir="$(mktemp -d "$TMPDIR/superzet-XXXXXX")"
     else
-        echo "Could not find 'curl' or 'wget' in your path"
-        exit 1
+        temp_dir="$(mktemp -d "/tmp/superzet-XXXXXX")"
     fi
 
-    "$platform" "$@"
+    "$platform"
 
-    if [ "$(command -v zed)" = "$HOME/.local/bin/zed" ]; then
-        echo "Zed has been installed. Run with 'zed'"
+    if [ "$(command -v superzet 2>/dev/null || true)" = "$HOME/.local/bin/superzet" ]; then
+        echo "superzet has been installed. Run with 'superzet'"
     else
-        echo "To run Zed from your terminal, you must add ~/.local/bin to your PATH"
+        echo "To run superzet from your terminal, you must add ~/.local/bin to your PATH"
         echo "Run:"
 
         case "$SHELL" in
@@ -74,88 +110,72 @@ main() {
                 ;;
         esac
 
-        echo "To run Zed now, '~/.local/bin/zed'"
+        echo "To run superzet now, '~/.local/bin/superzet'"
     fi
 }
 
 linux() {
-    if [ -n "${ZED_BUNDLE_PATH:-}" ]; then
-        cp "$ZED_BUNDLE_PATH" "$temp/zed-linux-$arch.tar.gz"
+    archive_path="$temp_dir/$(bundle_basename)-linux-$arch.tar.gz"
+    bundle_dir="$HOME/.local/$(bundle_basename).app"
+    app_id="$(linux_app_id)"
+
+    if [ -n "$bundle_path" ]; then
+        cp "$bundle_path" "$archive_path"
     else
-        echo "Downloading Zed version: $ZED_VERSION"
-        curl "https://cloud.zed.dev/releases/$channel/$ZED_VERSION/download?asset=zed&arch=$arch&os=linux&source=install.sh" > "$temp/zed-linux-$arch.tar.gz"
+        echo "Published Linux release bundles are not available. Build locally with ./script/install-linux."
+        exit 1
     fi
 
-    suffix=""
-    if [ "$channel" != "stable" ]; then
-        suffix="-$channel"
-    fi
+    rm -rf "$bundle_dir"
+    mkdir -p "$bundle_dir"
+    tar -xzf "$archive_path" -C "$HOME/.local/"
 
-    appid=""
-    case "$channel" in
-      stable)
-        appid="dev.zed.Zed"
-        ;;
-      nightly)
-        appid="dev.zed.Zed-Nightly"
-        ;;
-      preview)
-        appid="dev.zed.Zed-Preview"
-        ;;
-      dev)
-        appid="dev.zed.Zed-Dev"
-        ;;
-      *)
-        echo "Unknown release channel: ${channel}. Using stable app ID."
-        appid="dev.zed.Zed"
-        ;;
-    esac
-
-    # Unpack
-    rm -rf "$HOME/.local/zed$suffix.app"
-    mkdir -p "$HOME/.local/zed$suffix.app"
-    tar -xzf "$temp/zed-linux-$arch.tar.gz" -C "$HOME/.local/"
-
-    # Setup ~/.local directories
     mkdir -p "$HOME/.local/bin" "$HOME/.local/share/applications"
+    ln -sf "$bundle_dir/bin/superzet" "$HOME/.local/bin/superzet"
 
-    # Link the binary
-    if [ -f "$HOME/.local/zed$suffix.app/bin/zed" ]; then
-        ln -sf "$HOME/.local/zed$suffix.app/bin/zed" "$HOME/.local/bin/zed"
+    desktop_file_path="$HOME/.local/share/applications/${app_id}.desktop"
+    src_dir="$bundle_dir/share/applications"
+    if [ -f "$src_dir/${app_id}.desktop" ]; then
+        cp "$src_dir/${app_id}.desktop" "${desktop_file_path}"
     else
-        # support for versions before 0.139.x.
-        ln -sf "$HOME/.local/zed$suffix.app/bin/cli" "$HOME/.local/bin/zed"
+        echo "Missing desktop file for ${app_id}" >&2
+        exit 1
     fi
-
-    # Copy .desktop file
-    desktop_file_path="$HOME/.local/share/applications/${appid}.desktop"
-    src_dir="$HOME/.local/zed$suffix.app/share/applications"
-    if [ -f "$src_dir/${appid}.desktop" ]; then
-        cp "$src_dir/${appid}.desktop" "${desktop_file_path}"
-    else
-        # Fallback for older tarballs
-        cp "$src_dir/zed$suffix.desktop" "${desktop_file_path}"
-    fi
-    sed -i "s|Icon=zed|Icon=$HOME/.local/zed$suffix.app/share/icons/hicolor/512x512/apps/zed.png|g" "${desktop_file_path}"
-    sed -i "s|Exec=zed|Exec=$HOME/.local/zed$suffix.app/bin/zed|g" "${desktop_file_path}"
+    sed -i "s|Icon=superzet|Icon=$bundle_dir/share/icons/hicolor/512x512/apps/superzet.png|g" "${desktop_file_path}"
+    sed -i "s|Exec=superzet|Exec=$bundle_dir/bin/superzet|g" "${desktop_file_path}"
 }
 
 macos() {
-    echo "Downloading Zed version: $ZED_VERSION"
-    curl "https://cloud.zed.dev/releases/$channel/$ZED_VERSION/download?asset=zed&os=macos&arch=$arch&source=install.sh" > "$temp/Zed-$arch.dmg"
-    hdiutil attach -quiet "$temp/Zed-$arch.dmg" -mountpoint "$temp/mount"
-    app="$(cd "$temp/mount/"; echo *.app)"
+    dmg_path="$temp_dir/$(bundle_basename)-$arch.dmg"
+
+    if [ -n "$bundle_path" ]; then
+        cp "$bundle_path" "$dmg_path"
+    else
+        if [ "$channel" != "stable" ]; then
+            echo "Published downloads are only available for the stable channel." >&2
+            exit 1
+        fi
+        if [ "$arch" != "aarch64" ]; then
+            echo "Published macOS downloads are only available for Apple Silicon." >&2
+            exit 1
+        fi
+
+        echo "Downloading superzet version: latest"
+        download "${releases_base_url}/releases/${channel}/latest/download?asset=superzet&os=macos&arch=${arch}&source=install.sh" > "$dmg_path"
+    fi
+
+    hdiutil attach -quiet "$dmg_path" -mountpoint "$temp_dir/mount"
+    app="$(cd "$temp_dir/mount/" && echo *.app)"
     echo "Installing $app"
     if [ -d "/Applications/$app" ]; then
         echo "Removing existing $app"
         rm -rf "/Applications/$app"
     fi
-    ditto "$temp/mount/$app" "/Applications/$app"
-    hdiutil detach -quiet "$temp/mount"
+    ditto "$temp_dir/mount/$app" "/Applications/$app"
+    hdiutil detach -quiet "$temp_dir/mount"
 
     mkdir -p "$HOME/.local/bin"
-    # Link the binary
-    ln -sf "/Applications/$app/Contents/MacOS/cli" "$HOME/.local/bin/zed"
+    ln -sf "/Applications/$app/Contents/MacOS/cli" "$HOME/.local/bin/superzet"
 }
 
 main "$@"

@@ -24,8 +24,6 @@ function tagForChannel(channel, version) {
   switch (channel) {
     case "stable":
       return `v${normalizedVersion}`;
-    case "preview":
-      return `v${normalizedVersion}-pre`;
     default:
       return null;
   }
@@ -39,8 +37,6 @@ function releaseMatchesChannel(release, channel) {
   switch (channel) {
     case "stable":
       return !release.prerelease && !release.tag_name.endsWith("-pre");
-    case "preview":
-      return release.prerelease || release.tag_name.endsWith("-pre");
     default:
       return false;
   }
@@ -54,10 +50,6 @@ function assetNameFromQuery(searchParams) {
   if (asset === "superzet") {
     if (os === "macos" && arch === "aarch64") {
       return "superzet-aarch64.dmg";
-    }
-
-    if (os === "macos" && arch === "x86_64") {
-      return "superzet-x86_64.dmg";
     }
   }
 
@@ -150,7 +142,7 @@ export default {
     }
 
     const [, channel, version, action] = parts;
-    if (!["stable", "preview"].includes(channel)) {
+    if (channel !== "stable") {
       return jsonResponse({ error: "Unsupported release channel" }, 404);
     }
 

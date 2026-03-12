@@ -127,15 +127,13 @@ impl IClassFactory_Impl for ExplorerCommandInjectorFactory_Impl {
     }
 }
 
-#[cfg(all(feature = "stable", not(feature = "preview"), not(feature = "nightly")))]
+#[cfg(all(feature = "stable", not(feature = "dev")))]
 const MODULE_ID: GUID = GUID::from_u128(0x6a1f6b13_3b82_48a1_9e06_7bb0a6d0bffd);
-#[cfg(all(feature = "preview", not(feature = "stable"), not(feature = "nightly")))]
-const MODULE_ID: GUID = GUID::from_u128(0xaf8e85ea_fb20_4db2_93cf_56513c1ec697);
-#[cfg(all(feature = "nightly", not(feature = "stable"), not(feature = "preview")))]
-const MODULE_ID: GUID = GUID::from_u128(0x266f2cfe_1653_42af_b55c_fe3590c83871);
+#[cfg(all(feature = "dev", not(feature = "stable")))]
+const MODULE_ID: GUID = GUID::from_u128(0x0b594b3a_d6cc_4d44_9fb3_7ad4e72d1504);
 
 // Make cargo clippy happy
-#[cfg(all(feature = "nightly", feature = "stable", feature = "preview"))]
+#[cfg(all(feature = "stable", feature = "dev"))]
 const MODULE_ID: GUID = GUID::from_u128(0x685f4d49_6718_4c55_b271_ebb5c6a48d6f);
 
 #[unsafe(no_mangle)]
@@ -183,15 +181,13 @@ fn get_zed_exe_path() -> Option<String> {
 
 #[inline]
 fn retrieve_command_description() -> Result<HSTRING> {
-    #[cfg(all(feature = "stable", not(feature = "preview"), not(feature = "nightly")))]
+    #[cfg(all(feature = "stable", not(feature = "dev")))]
     const REG_PATH: &str = "Software\\Classes\\SuperzetEditorContextMenu";
-    #[cfg(all(feature = "preview", not(feature = "stable"), not(feature = "nightly")))]
-    const REG_PATH: &str = "Software\\Classes\\SuperzetEditorPreviewContextMenu";
-    #[cfg(all(feature = "nightly", not(feature = "stable"), not(feature = "preview")))]
-    const REG_PATH: &str = "Software\\Classes\\SuperzetEditorNightlyContextMenu";
+    #[cfg(all(feature = "dev", not(feature = "stable")))]
+    const REG_PATH: &str = "Software\\Classes\\SuperzetEditorDevContextMenu";
 
     // Make cargo clippy happy
-    #[cfg(all(feature = "nightly", feature = "stable", feature = "preview"))]
+    #[cfg(all(feature = "stable", feature = "dev"))]
     const REG_PATH: &str = "Software\\Classes\\SuperzetEditorClippyContextMenu";
 
     let key = windows_registry::CURRENT_USER.open(REG_PATH)?;

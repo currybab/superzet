@@ -2,7 +2,7 @@ use gh_workflow::*;
 
 use crate::tasks::workflows::{
     runners,
-    steps::{self, CheckoutStep, named},
+    steps::{self, CheckoutStep, DEFAULT_REPOSITORY_OWNER_GUARD, named},
     vars::{StepOutput, WorkflowInput},
 };
 
@@ -32,23 +32,19 @@ fn run_bump_patch_version(branch: &WorkflowInput) -> steps::NamedJob {
         named::bash(indoc::indoc! {r#"
             channel="$(cat crates/zed/RELEASE_CHANNEL)"
 
-            tag_suffix=""
             case $channel in
               stable)
                 ;;
-              preview)
-                tag_suffix="-pre"
-                ;;
               *)
-                echo "this must be run on either of stable|preview release branches" >&2
+                echo "this must be run on the stable release branch" >&2
                 exit 1
                 ;;
             esac
             which cargo-set-version > /dev/null || cargo install cargo-edit -f --no-default-features --features "set-version"
-            output="$(cargo set-version -p zed --bump patch 2>&1 | sed 's/.* //')"
+            output="$(cargo set-version -p superzet --bump patch 2>&1 | sed 's/.* //')"
             git commit -am "Bump to $output for @$GITHUB_ACTOR"
-            git tag "v${output}${tag_suffix}"
-            git push origin HEAD "v${output}${tag_suffix}"
+            git tag "v${output}"
+            git push origin HEAD "v${output}"
         "#})
         .add_env(("GIT_COMMITTER_NAME", "Zed Zippy"))
         .add_env((
@@ -67,9 +63,7 @@ fn run_bump_patch_version(branch: &WorkflowInput) -> steps::NamedJob {
 
     named::job(
         Job::default()
-            .cond(Expression::new(
-                "github.repository_owner == 'zed-industries'",
-            ))
+            .cond(Expression::new(DEFAULT_REPOSITORY_OWNER_GUARD))
             .runs_on(runners::LINUX_XL)
             .add_step(authenticate)
             .add_step(checkout_branch(branch, &token))

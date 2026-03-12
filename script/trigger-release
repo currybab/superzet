@@ -3,13 +3,15 @@ set -euo pipefail
 
 which gh >/dev/null || brew install gh
 
-if [ "$1" == "nightly" ]; then
-  ./script/bump-nightly
-  exit
+channel="${1:-}"
+
+if [ "$channel" != "stable" ]; then
+  echo "usage: $0 stable" >&2
+  exit 1
 fi
 
-version=$(./script/get-released-version "$1" | sed 's/\.[^\.]*$/.x/')
-echo "Bumping $1 (v$version)"
+version=$(./script/get-released-version "$channel" | sed 's/\.[^\.]*$/.x/')
+echo "Bumping $channel (v$version)"
 
 gh workflow run "bump_patch_version.yml" -f branch="v$version"
-echo "Follow along at: https://github.com/zed-industries/zed/actions"
+echo "Follow along at: https://github.com/currybab/superzet/actions/workflows/bump_patch_version.yml"

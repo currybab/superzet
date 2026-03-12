@@ -10,7 +10,7 @@ on:
         type: string
 jobs:
   run_bump_patch_version:
-    if: github.repository_owner == 'zed-industries'
+    if: github.repository_owner == 'currybab'
     runs-on: ubuntu-24.04
     steps:
     - id: get-app-token
@@ -29,23 +29,19 @@ jobs:
       run: |
         channel="$(cat crates/zed/RELEASE_CHANNEL)"
 
-        tag_suffix=""
         case $channel in
           stable)
             ;;
-          preview)
-            tag_suffix="-pre"
-            ;;
           *)
-            echo "this must be run on either of stable|preview release branches" >&2
+            echo "this must be run on the stable release branch" >&2
             exit 1
             ;;
         esac
         which cargo-set-version > /dev/null || cargo install cargo-edit -f --no-default-features --features "set-version"
-        output="$(cargo set-version -p zed --bump patch 2>&1 | sed 's/.* //')"
+        output="$(cargo set-version -p superzet --bump patch 2>&1 | sed 's/.* //')"
         git commit -am "Bump to $output for @$GITHUB_ACTOR"
-        git tag "v${output}${tag_suffix}"
-        git push origin HEAD "v${output}${tag_suffix}"
+        git tag "v${output}"
+        git push origin HEAD "v${output}"
       env:
         GIT_COMMITTER_NAME: Zed Zippy
         GIT_COMMITTER_EMAIL: 234243425+zed-zippy[bot]@users.noreply.github.com

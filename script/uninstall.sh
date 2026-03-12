@@ -1,27 +1,88 @@
 #!/usr/bin/env sh
 set -eu
 
-# Uninstalls Zed that was installed using the install.sh script
+app_dir_name() {
+    case "$channel" in
+        stable)
+            echo "superzet"
+            ;;
+        dev)
+            echo "superzet-dev"
+            ;;
+        *)
+            echo "Unsupported release channel: $channel" >&2
+            exit 1
+            ;;
+    esac
+}
+
+linux_app_id() {
+    case "$channel" in
+        stable)
+            echo "ai.nangman.superzet"
+            ;;
+        dev)
+            echo "ai.nangman.superzet-dev"
+            ;;
+        *)
+            echo "Unsupported release channel: $channel" >&2
+            exit 1
+            ;;
+    esac
+}
+
+mac_app_bundle() {
+    case "$channel" in
+        stable)
+            echo "superzet.app"
+            ;;
+        dev)
+            echo "superzet dev.app"
+            ;;
+        *)
+            echo "Unsupported release channel: $channel" >&2
+            exit 1
+            ;;
+    esac
+}
+
+mac_bundle_id() {
+    case "$channel" in
+        stable)
+            echo "ai.nangman.superzet"
+            ;;
+        dev)
+            echo "ai.nangman.superzet-dev"
+            ;;
+        *)
+            echo "Unsupported release channel: $channel" >&2
+            exit 1
+            ;;
+    esac
+}
 
 check_remaining_installations() {
     platform="$(uname -s)"
     if [ "$platform" = "Darwin" ]; then
-        # Check for any Zed variants in /Applications
-        remaining=$(ls -d /Applications/Zed*.app 2>/dev/null | wc -l)
+        remaining=$(ls -d /Applications/superzet*.app 2>/dev/null | wc -l)
         [ "$remaining" -eq 0 ]
     else
-        # Check for any Zed variants in ~/.local
-        remaining=$(ls -d "$HOME/.local/zed"*.app 2>/dev/null | wc -l)
+        remaining=$(ls -d "$HOME/.local/superzet"*.app 2>/dev/null | wc -l)
         [ "$remaining" -eq 0 ]
     fi
 }
 
 prompt_remove_preferences() {
-    printf "Do you want to keep your Zed preferences? [Y/n] "
+    config_dir="$1"
+    if [ ! -d "$config_dir" ]; then
+        return
+    fi
+
+    printf "Do you want to keep your superzet preferences for %s? [Y/n] " "$channel"
     read -r response
     case "$response" in
         [nN]|[nN][oO])
-            rm -rf "$HOME/.config/zed"
+            rm -rf "$config_dir"
             echo "Preferences removed."
             ;;
         *)
@@ -32,127 +93,70 @@ prompt_remove_preferences() {
 
 main() {
     platform="$(uname -s)"
-    channel="${ZED_CHANNEL:-stable}"
+    channel="${SUPERZET_CHANNEL:-${ZED_CHANNEL:-stable}}"
 
-    if [ "$platform" = "Darwin" ]; then
-        platform="macos"
-    elif [ "$platform" = "Linux" ]; then
-        platform="linux"
-    else
-        echo "Unsupported platform $platform"
-        exit 1
-    fi
+    case "$platform" in
+        Darwin)
+            macos
+            ;;
+        Linux)
+            linux
+            ;;
+        *)
+            echo "Unsupported platform $platform"
+            exit 1
+            ;;
+    esac
 
-    "$platform"
-
-    echo "Zed has been uninstalled"
+    echo "superzet has been uninstalled"
 }
 
 linux() {
-    suffix=""
-    if [ "$channel" != "stable" ]; then
-        suffix="-$channel"
-    fi
+    name="$(app_dir_name)"
+    app_id="$(linux_app_id)"
+    config_dir="$HOME/.config/$name"
+    data_dir="$HOME/.local/share/$name"
+    state_dir="$HOME/.local/state/$name"
+    cache_dir="$HOME/.cache/$name"
 
-    appid=""
-    db_suffix="stable"
-    case "$channel" in
-      stable)
-        appid="dev.zed.Zed"
-        db_suffix="stable"
-        ;;
-      nightly)
-        appid="dev.zed.Zed-Nightly"
-        db_suffix="nightly"
-        ;;
-      preview)
-        appid="dev.zed.Zed-Preview"
-        db_suffix="preview"
-        ;;
-      dev)
-        appid="dev.zed.Zed-Dev"
-        db_suffix="dev"
-        ;;
-      *)
-        echo "Unknown release channel: ${channel}. Using stable app ID."
-        appid="dev.zed.Zed"
-        db_suffix="stable"
-        ;;
-    esac
+    rm -rf "$HOME/.local/$name.app"
+    rm -f "$HOME/.local/bin/superzet"
+    rm -f "$HOME/.local/share/applications/${app_id}.desktop"
+    rm -rf "$data_dir" "$state_dir" "$cache_dir"
 
-    # Remove the app directory
-    rm -rf "$HOME/.local/zed$suffix.app"
-
-    # Remove the binary symlink
-    rm -f "$HOME/.local/bin/zed"
-
-    # Remove the .desktop file
-    rm -f "$HOME/.local/share/applications/${appid}.desktop"
-
-    # Remove the database directory for this channel
-    rm -rf "$HOME/.local/share/zed/db/0-$db_suffix"
-
-    # Remove socket file
-    rm -f "$HOME/.local/share/zed/zed-$db_suffix.sock"
-
-    # Remove the entire Zed directory if no installations remain
     if check_remaining_installations; then
-        rm -rf "$HOME/.local/share/zed"
-        prompt_remove_preferences
+        rm -rf "$HOME/.superzet_server" "$HOME/.superzet_wsl_server"
     fi
 
-    rm -rf $HOME/.superzet_server
+    prompt_remove_preferences "$config_dir"
 }
 
 macos() {
-    app="Zed.app"
-    db_suffix="stable"
-    app_id="dev.zed.Zed"
-    case "$channel" in
-      nightly)
-        app="Zed Nightly.app"
-        db_suffix="nightly"
-        app_id="dev.zed.Zed-Nightly"
-        ;;
-      preview)
-        app="Zed Preview.app"
-        db_suffix="preview"
-        app_id="dev.zed.Zed-Preview"
-        ;;
-      dev)
-        app="Zed Dev.app"
-        db_suffix="dev"
-        app_id="dev.zed.Zed-Dev"
-        ;;
-    esac
+    name="$(app_dir_name)"
+    bundle_id="$(mac_bundle_id)"
+    app_bundle="$(mac_app_bundle)"
+    config_dir="$HOME/.config/$name"
 
-    # Remove the app bundle
-    if [ -d "/Applications/$app" ]; then
-        rm -rf "/Applications/$app"
+    if [ -d "/Applications/$app_bundle" ]; then
+        rm -rf "/Applications/$app_bundle"
     fi
 
-    # Remove the binary symlink
-    rm -f "$HOME/.local/bin/zed"
+    rm -f "$HOME/.local/bin/superzet"
+    rm -rf "$HOME/Library/Application Support/$name"
+    rm -rf "$HOME/.local/state/$name"
+    rm -rf "$HOME/Library/Logs/$name"
+    rm -rf "$HOME/Library/Caches/$name"
+    rm -rf "$HOME/Library/Application Support/com.apple.sharedfilelist/com.apple.LSSharedFileList.ApplicationRecentDocuments/$bundle_id.sfl"*
+    rm -rf "$HOME/Library/Caches/$bundle_id"
+    rm -rf "$HOME/Library/HTTPStorages/$bundle_id"
+    rm -rf "$HOME/Library/Preferences/$bundle_id.plist"
+    rm -rf "$HOME/Library/Saved Application State/$bundle_id.savedState"
 
-    # Remove the database directory for this channel
-    rm -rf "$HOME/Library/Application Support/Zed/db/0-$db_suffix"
-
-    # Remove app-specific files and directories
-    rm -rf "$HOME/Library/Application Support/com.apple.sharedfilelist/com.apple.LSSharedFileList.ApplicationRecentDocuments/$app_id.sfl"*
-    rm -rf "$HOME/Library/Caches/$app_id"
-    rm -rf "$HOME/Library/HTTPStorages/$app_id"
-    rm -rf "$HOME/Library/Preferences/$app_id.plist"
-    rm -rf "$HOME/Library/Saved Application State/$app_id.savedState"
-
-    # Remove the entire Zed directory if no installations remain
     if check_remaining_installations; then
-        rm -rf "$HOME/Library/Application Support/Zed"
-        rm -rf "$HOME/Library/Logs/Zed"
-
-        prompt_remove_preferences
+        rm -rf "$HOME/.superzet_server" "$HOME/.superzet_wsl_server"
     fi
 
-    rm -rf $HOME/.superzet_server
+    prompt_remove_preferences "$config_dir"
 }
 
 main "$@"

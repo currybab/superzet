@@ -185,7 +185,7 @@ fn orchestrate_impl(rules: &[&PathCondition], include_package_filter: bool) -> N
     script.push_str(indoc::indoc! {r#"
         set -euo pipefail
         if [ -z "$GITHUB_BASE_REF" ]; then
-          echo "Not in a PR context (i.e., push to main/stable/preview)"
+          echo "Not in a PR context (i.e., push to main/stable)"
           COMPARE_REV="$(git rev-parse HEAD~1)"
         else
           echo "In a PR context comparing to pull_request.base.ref"
@@ -200,18 +200,18 @@ fn orchestrate_impl(rules: &[&PathCondition], include_package_filter: bool) -> N
           local grep_arg="$3"
 
           echo "$CHANGED_FILES" | grep "$grep_arg" "$pattern" && \
-            echo "${output_name}=true" >> "$GITHUB_OUTPUT" || \
+    echo "${output_name}=true" >> "$GITHUB_OUTPUT" || \
             echo "${output_name}=false" >> "$GITHUB_OUTPUT"
         }
 
-    "#});
+        "#});
 
     let mut outputs = IndexMap::new();
 
     if include_package_filter {
         script.push_str(indoc::indoc! {r#"
         # Check for changes that require full rebuild (no filter)
-        # Direct pushes to main/stable/preview always run full suite
+        # Direct pushes to main/stable always run full suite
         if [ -z "$GITHUB_BASE_REF" ]; then
           echo "Not a PR, running full test suite"
           echo "changed_packages=" >> "$GITHUB_OUTPUT"

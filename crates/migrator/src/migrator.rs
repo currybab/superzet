@@ -3456,7 +3456,7 @@ mod tests {
                 "agent": {
                     "always_allow_tool_actions": true
                 },
-                "nightly": {
+                "dev": {
                     "agent": {
                         "tool_permissions": {
                             "default_mode": "confirm"
@@ -3474,7 +3474,7 @@ mod tests {
                             "default": "allow"
                         }
                     },
-                    "nightly": {
+                    "dev": {
                         "agent": {
                             "tool_permissions": {
                                 "default": "confirm"

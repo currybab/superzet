@@ -46,7 +46,7 @@ pub struct Telemetry {
 struct TelemetryState {
     settings: TelemetrySettings,
     system_id: Option<Arc<str>>,       // Per system
-    installation_id: Option<Arc<str>>, // Per app installation (different for dev, nightly, preview, and stable)
+    installation_id: Option<Arc<str>>, // Per app installation (different for dev and stable)
     session_id: Option<String>,        // Per app launch
     metrics_id: Option<Arc<str>>,      // Per logged-in user
     release_channel: Option<ReleaseChannel>,
