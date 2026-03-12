@@ -29,6 +29,13 @@ const WRAPPER_MARKER: &str = "# Superzet agent wrapper v1";
 static HOOK_RUNTIME: OnceLock<AgentHookRuntime> = OnceLock::new();
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PreparedWorkspaceLaunch {
+    pub command: String,
+    pub args: Vec<String>,
+    pub environment: HashMap<String, String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AgentHookEventType {
     Start,
     Stop,
@@ -90,7 +97,33 @@ pub fn spawn_for_workspace(
     } else {
         format!("{} {}", preset.command, preset.args.join(" "))
     };
+    let launch = prepare_workspace_launch(workspace, preset)?;
 
+    Ok(SpawnInTerminal {
+        id: TaskId(format!("superzet:{}:{}", workspace.id, session.id)),
+        full_label,
+        label,
+        command: Some(launch.command),
+        args: launch.args,
+        command_label,
+        cwd: Some(workspace.cwd_path()),
+        env: launch.environment,
+        use_new_terminal: true,
+        allow_concurrent_runs: true,
+        reveal: RevealStrategy::Always,
+        reveal_target: RevealTarget::Center,
+        hide: HideStrategy::Never,
+        shell: Shell::System,
+        show_summary: true,
+        show_command: true,
+        show_rerun: true,
+    })
+}
+
+pub fn prepare_workspace_launch(
+    workspace: &WorkspaceEntry,
+    preset: &AgentPreset,
+) -> Result<PreparedWorkspaceLaunch> {
     let mut environment = preset.env.clone().into_iter().collect::<HashMap<_, _>>();
     inject_terminal_environment(&mut environment)?;
     environment.insert(AGENT_WORKSPACE_ID_ENV_VAR.to_string(), workspace.id.clone());
@@ -109,24 +142,10 @@ pub fn spawn_for_workspace(
         (preset.command.clone(), preset.args.clone())
     };
 
-    Ok(SpawnInTerminal {
-        id: TaskId(format!("superzet:{}:{}", workspace.id, session.id)),
-        full_label,
-        label,
-        command: Some(command),
+    Ok(PreparedWorkspaceLaunch {
+        command,
         args,
-        command_label,
-        cwd: Some(workspace.cwd_path()),
-        env: environment,
-        use_new_terminal: true,
-        allow_concurrent_runs: true,
-        reveal: RevealStrategy::Always,
-        reveal_target: RevealTarget::Center,
-        hide: HideStrategy::Never,
-        shell: Shell::System,
-        show_summary: true,
-        show_command: true,
-        show_rerun: true,
+        environment,
     })
 }
 

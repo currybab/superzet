@@ -665,6 +665,7 @@ impl TerminalPanel {
             terminal_panel.add_terminal_shell_internal(
                 local,
                 working_directory,
+                HashMap::default(),
                 RevealStrategy::Always,
                 window,
                 cx,
@@ -858,7 +859,14 @@ impl TerminalPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Task<Result<WeakEntity<Terminal>>> {
-        self.add_terminal_shell_internal(false, cwd, reveal_strategy, window, cx)
+        self.add_terminal_shell_internal(
+            false,
+            cwd,
+            HashMap::default(),
+            reveal_strategy,
+            window,
+            cx,
+        )
     }
 
     #[cfg(any(test, feature = "test-support"))]
@@ -869,13 +877,21 @@ impl TerminalPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Task<Result<WeakEntity<Terminal>>> {
-        self.add_terminal_shell_internal(true, None, reveal_strategy, window, cx)
+        self.add_terminal_shell_internal(
+            true,
+            None,
+            HashMap::default(),
+            reveal_strategy,
+            window,
+            cx,
+        )
     }
 
     fn add_terminal_shell_internal(
         &mut self,
         force_local: bool,
         cwd: Option<PathBuf>,
+        environment_overrides: HashMap<String, String>,
         reveal_strategy: RevealStrategy,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -897,7 +913,13 @@ impl TerminalPanel {
                     .await
             } else {
                 project
-                    .update(cx, |project, cx| project.create_terminal_shell(cwd, cx))
+                    .update(cx, |project, cx| {
+                        project.create_terminal_shell_with_environment(
+                            cwd,
+                            environment_overrides,
+                            cx,
+                        )
+                    })
                     .await
             };
 

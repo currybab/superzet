@@ -29,6 +29,7 @@ smol.workspace = true
 superzet_git.workspace = true
 superzet_agent.workspace = true
 superzet_model.workspace = true
+task.workspace = true
 terminal.workspace = true
 terminal_view.workspace = true
 ui.workspace = true

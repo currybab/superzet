@@ -4,7 +4,7 @@ use editor::{Editor, EditorEvent, actions::SelectAll};
 use git::repository::validate_worktree_directory;
 use git_ui::git_panel::GitPanel;
 use gpui::{
-    Action, Animation, AnimationExt, AsyncWindowContext, ClickEvent, DismissEvent, Entity,
+    Action, Animation, AnimationExt, App, AsyncWindowContext, ClickEvent, DismissEvent, Entity,
     EntityId, EventEmitter, FocusHandle, Focusable, MouseButton, MouseDownEvent, PathPromptOptions,
     Point, PromptLevel, Subscription, Task, WeakEntity, WindowHandle, actions, anchored, deferred,
 };
@@ -22,6 +22,7 @@ use superzet_model::{
     StoredSshPortForward, SuperzetStore, TaskStatus, WorkspaceAttentionStatus, WorkspaceEntry,
     WorkspaceKind, WorkspaceLocation, aggregate_workspace_attention_status,
 };
+use task::{Shell, ShellKind};
 use terminal::terminal_settings::{TerminalAgentNotificationMode, TerminalSettings};
 use terminal_view::{TerminalView, terminal_panel::TerminalPanel};
 use ui::{
@@ -601,11 +602,103 @@ fn launch_workspace_preset(
     store.update(cx, |store, cx| {
         store.set_workspace_agent_preset(&workspace_entry.id, &preset.id, cx);
     });
+    if let Some(task_prompt) = task_prompt.filter(|task_prompt| !task_prompt.trim().is_empty()) {
+        launch_workspace_preset_task(
+            workspace_handle,
+            workspace_entry,
+            preset,
+            task_prompt,
+            window,
+            cx,
+        );
+    } else {
+        launch_workspace_preset_in_terminal(workspace_handle, workspace_entry, preset, window, cx);
+    }
+}
+
+fn launch_workspace_preset_in_terminal(
+    workspace_handle: Entity<Workspace>,
+    workspace_entry: WorkspaceEntry,
+    preset: AgentPreset,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let launch = match superzet_agent::prepare_workspace_launch(&workspace_entry, &preset) {
+        Ok(launch) => launch,
+        Err(error) => {
+            show_workspace_toast(
+                &workspace_handle,
+                format!("Failed to prepare {}: {error}", preset.label),
+                cx,
+            );
+            return;
+        }
+    };
+
+    let workspace_path = workspace_entry.cwd_path();
+    let (command_line, open_terminal_task) = workspace_handle.update(cx, |workspace, cx| {
+        let shell_kind = preset_shell_kind(workspace, &workspace_path, cx);
+        let command_line = render_preset_command_line(&launch.command, &launch.args, shell_kind);
+        let environment = launch.environment.clone();
+        let working_directory = Some(workspace_path.clone());
+        let preset_label = preset.label.clone();
+        let open_terminal_task =
+            TerminalPanel::add_center_terminal(workspace, window, cx, move |project, cx| {
+                project.create_terminal_shell_with_environment_and_title(
+                    working_directory,
+                    environment,
+                    preset_label,
+                    cx,
+                )
+            });
+        (command_line, open_terminal_task)
+    });
+
+    window
+        .spawn(cx, async move |cx| {
+            let terminal = match open_terminal_task.await {
+                Ok(terminal) => terminal,
+                Err(error) => {
+                    show_workspace_toast_async(
+                        &workspace_handle,
+                        format!("Failed to open {} terminal: {error}", preset.label),
+                        cx,
+                    );
+                    return Ok::<(), anyhow::Error>(());
+                }
+            };
+
+            if let Err(error) = terminal.update_in(cx, |terminal, _, _| {
+                let mut command_bytes = command_line.into_bytes();
+                command_bytes.push(b'\r');
+                terminal.input(command_bytes);
+            }) {
+                show_workspace_toast_async(
+                    &workspace_handle,
+                    format!("Failed to launch {} in terminal: {error}", preset.label),
+                    cx,
+                );
+            }
+
+            Ok::<(), anyhow::Error>(())
+        })
+        .detach();
+}
+
+fn launch_workspace_preset_task(
+    workspace_handle: Entity<Workspace>,
+    workspace_entry: WorkspaceEntry,
+    preset: AgentPreset,
+    task_prompt: String,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let store = SuperzetStore::global(cx);
     let session = store.update(cx, |store, cx| {
         store.start_session(
             &workspace_entry.id,
             &preset,
-            session_label_for_prompt(&preset, task_prompt.as_deref()),
+            session_label_for_prompt(&preset, Some(task_prompt.as_str())),
             cx,
         )
     });
@@ -672,29 +765,25 @@ fn launch_workspace_preset(
                 }
             };
 
-            if let Some(task_prompt) = task_prompt
-                && !task_prompt.trim().is_empty()
-            {
-                if let Err(error) = terminal.update_in(cx, |terminal, _, _| {
-                    let prompt = format!("{task_prompt}\n");
-                    terminal.input(prompt.into_bytes());
-                }) {
-                    let reason = format!("Failed to send initial prompt: {error}");
-                    if update_store_async(&store, cx, |store, cx| {
-                        store.update_session_status(
-                            &session.id,
-                            TaskStatus::Failed,
-                            Some(reason.clone()),
-                            cx,
-                        );
-                    })
-                    .is_none()
-                    {
-                        return Ok::<(), anyhow::Error>(());
-                    }
-                    show_workspace_toast_async(&workspace_handle, reason, cx);
+            if let Err(error) = terminal.update_in(cx, |terminal, _, _| {
+                let prompt = format!("{task_prompt}\n");
+                terminal.input(prompt.into_bytes());
+            }) {
+                let reason = format!("Failed to send initial prompt: {error}");
+                if update_store_async(&store, cx, |store, cx| {
+                    store.update_session_status(
+                        &session.id,
+                        TaskStatus::Failed,
+                        Some(reason.clone()),
+                        cx,
+                    );
+                })
+                .is_none()
+                {
                     return Ok::<(), anyhow::Error>(());
                 }
+                show_workspace_toast_async(&workspace_handle, reason, cx);
+                return Ok::<(), anyhow::Error>(());
             }
 
             let exit_status = match terminal
@@ -756,6 +845,38 @@ fn launch_workspace_preset(
             Ok::<(), anyhow::Error>(())
         })
         .detach();
+}
+
+fn preset_shell_kind(workspace: &Workspace, workspace_path: &PathBuf, cx: &App) -> ShellKind {
+    let project = workspace.project();
+    let project = project.read(cx);
+    let shell = project
+        .remote_client()
+        .and_then(|remote_client| remote_client.read(cx).shell().map(Shell::Program))
+        .unwrap_or_else(|| {
+            project
+                .terminal_settings(&Some(workspace_path.clone()), cx)
+                .shell
+                .clone()
+        });
+
+    shell.shell_kind(project.path_style(cx).is_windows())
+}
+
+fn render_preset_command_line(command: &str, args: &[String], shell_kind: ShellKind) -> String {
+    if args.is_empty() {
+        return command.to_string();
+    }
+
+    let mut parts = Vec::with_capacity(args.len() + 1);
+    parts.push(command.to_string());
+    parts.extend(args.iter().map(|argument| {
+        shell_kind
+            .try_quote(argument)
+            .map(|value| value.into_owned())
+            .unwrap_or_else(|| argument.clone())
+    }));
+    parts.join(" ")
 }
 
 fn session_label_for_prompt(preset: &AgentPreset, task_prompt: Option<&str>) -> String {
@@ -4149,4 +4270,32 @@ fn workspace_has_display_alias(workspace: &WorkspaceEntry) -> bool {
         .display_name
         .as_deref()
         .is_some_and(|name| !name.trim().is_empty())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn render_preset_command_line_preserves_verbatim_shell_commands() {
+        let command = r#"codex -c model_reasoning_summary="detailed" -c model_supports_reasoning_summaries=true"#;
+
+        assert_eq!(
+            render_preset_command_line(command, &[], ShellKind::Posix),
+            command
+        );
+    }
+
+    #[test]
+    fn render_preset_command_line_quotes_split_arguments() {
+        let arguments = vec![
+            "-c".to_string(),
+            r#"model_reasoning_summary="detailed""#.to_string(),
+        ];
+
+        assert_eq!(
+            render_preset_command_line("codex", &arguments, ShellKind::Posix),
+            r#"codex -c 'model_reasoning_summary="detailed"'"#
+        );
+    }
 }

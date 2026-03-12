@@ -16857,6 +16857,7 @@ dependencies = [
  "superzet_agent",
  "superzet_git",
  "superzet_model",
+ "task",
  "terminal",
  "terminal_view",
  "ui",

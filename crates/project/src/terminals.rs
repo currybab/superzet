@@ -195,6 +195,7 @@ impl Project {
                                         env,
                                         path,
                                         remote_client,
+                                        None,
                                         cx,
                                     )?
                                 }
@@ -206,6 +207,7 @@ impl Project {
                                     env,
                                     path,
                                     remote_client,
+                                    None,
                                     cx,
                                 )?,
                             },
@@ -293,7 +295,32 @@ impl Project {
         cwd: Option<PathBuf>,
         cx: &mut Context<Self>,
     ) -> Task<Result<Entity<Terminal>>> {
-        self.create_terminal_shell_internal(cwd, false, cx)
+        self.create_terminal_shell_internal(cwd, false, HashMap::default(), None, cx)
+    }
+
+    pub fn create_terminal_shell_with_environment(
+        &mut self,
+        cwd: Option<PathBuf>,
+        environment_overrides: HashMap<String, String>,
+        cx: &mut Context<Self>,
+    ) -> Task<Result<Entity<Terminal>>> {
+        self.create_terminal_shell_internal(cwd, false, environment_overrides, None, cx)
+    }
+
+    pub fn create_terminal_shell_with_environment_and_title(
+        &mut self,
+        cwd: Option<PathBuf>,
+        environment_overrides: HashMap<String, String>,
+        title_override: String,
+        cx: &mut Context<Self>,
+    ) -> Task<Result<Entity<Terminal>>> {
+        self.create_terminal_shell_internal(
+            cwd,
+            false,
+            environment_overrides,
+            Some(title_override),
+            cx,
+        )
     }
 
     /// Creates a local terminal even if the project is remote.
@@ -310,7 +337,7 @@ impl Project {
             // Local project: use project directory like normal terminals
             self.active_project_directory(cx).map(|p| p.to_path_buf())
         };
-        self.create_terminal_shell_internal(working_directory, true, cx)
+        self.create_terminal_shell_internal(working_directory, true, HashMap::default(), None, cx)
     }
 
     /// Internal method for creating terminal shells.
@@ -320,6 +347,8 @@ impl Project {
         &mut self,
         cwd: Option<PathBuf>,
         force_local: bool,
+        environment_overrides: HashMap<String, String>,
+        title_override: Option<String>,
         cx: &mut Context<Self>,
     ) -> Task<Result<Entity<Terminal>>> {
         let path = cwd.map(|p| Arc::from(&*p));
@@ -378,9 +407,12 @@ impl Project {
             let shell_kind = ShellKind::new(&shell, path_style.is_windows());
             let mut env = env_task.await.unwrap_or_default();
             env.extend(settings.env);
-            if remote_client.is_none() {
+            if remote_client.is_none()
+                && !environment_overrides.contains_key(superzet_agent::AGENT_TERMINAL_ID_ENV_VAR)
+            {
                 maybe_inject_superzet_agent_environment(&mut env);
             }
+            env.extend(environment_overrides);
 
             let activation_script = maybe!(async {
                 for toolchain in toolchains {
@@ -405,10 +437,18 @@ impl Project {
                 .update(cx, move |_, cx| {
                     let (shell, env) = {
                         match remote_client {
-                            Some(remote_client) => {
-                                create_remote_shell(None, env, path, remote_client, cx)?
-                            }
-                            None => (settings.shell, env),
+                            Some(remote_client) => create_remote_shell(
+                                None,
+                                env,
+                                path,
+                                remote_client,
+                                title_override.clone(),
+                                cx,
+                            )?,
+                            None => (
+                                apply_terminal_title_override(settings.shell, title_override),
+                                env,
+                            ),
                         }
                     };
                     anyhow::Ok(TerminalBuilder::new(
@@ -616,11 +656,36 @@ fn maybe_inject_superzet_agent_environment(env: &mut HashMap<String, String>) {
     }
 }
 
+fn apply_terminal_title_override(shell: Shell, title_override: Option<String>) -> Shell {
+    let Some(title_override) = title_override else {
+        return shell;
+    };
+
+    match shell {
+        Shell::System => Shell::WithArguments {
+            program: util::get_system_shell(),
+            args: Vec::new(),
+            title_override: Some(title_override),
+        },
+        Shell::Program(program) => Shell::WithArguments {
+            program,
+            args: Vec::new(),
+            title_override: Some(title_override),
+        },
+        Shell::WithArguments { program, args, .. } => Shell::WithArguments {
+            program,
+            args,
+            title_override: Some(title_override),
+        },
+    }
+}
+
 fn create_remote_shell(
     spawn_command: Option<(&String, &Vec<String>)>,
     mut env: HashMap<String, String>,
     working_directory: Option<Arc<Path>>,
     remote_client: Entity<RemoteClient>,
+    title_override: Option<String>,
     cx: &mut App,
 ) -> Result<(Shell, HashMap<String, String>)> {
     insert_zed_terminal_env(&mut env, &release_channel::AppVersion::global(cx));
@@ -645,7 +710,7 @@ fn create_remote_shell(
         Shell::WithArguments {
             program: command.program,
             args: command.args,
-            title_override: Some(format!("{} — Terminal", host)),
+            title_override: Some(title_override.unwrap_or_else(|| format!("{} — Terminal", host))),
         },
         command.env,
     ))
