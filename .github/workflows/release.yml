@@ -160,7 +160,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
     - name: release::download_workflow_artifacts
-      uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+      uses: actions/download-artifact@70fc10eb3fdc3a884b88c9f72e79bb36de8d0f6e
       with:
         path: ./artifacts/
     - name: ls -lR ./artifacts
