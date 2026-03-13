@@ -16613,7 +16613,7 @@ dependencies = [
 
 [[package]]
 name = "superzet"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "acp_thread",
  "acp_tools",
