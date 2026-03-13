@@ -1,12 +1,12 @@
 # superzet
 
 <p align="center">
-  <img src="assets/branding/logo_default.png" alt="superzet" width="180" />
+  <img src="assets/branding/logo_nightly.png" alt="superzet" width="180" />
 </p>
 
 `superzet` is a local-first workspace shell for coding agents.
 
-It is built on top of a Zed fork, but the product scope is narrower: one window, multiple local workspaces, fast file navigation, diff views, and terminal-heavy agent workflows.
+It is built on top of a Zed fork, but the product scope is narrower: one window, multiple local workspaces with git worktree, fast file navigation, diff views, and terminal-heavy agent workflows.
 
 ## Status
 
@@ -37,6 +37,7 @@ Next:
 
 - center-pane tabs for external ACP agents using selected pieces of the existing ACP / `agent_ui` stack, without reviving Zed's own agent panel
 - next-edit integration
+- native alarm
 
 Later:
 
