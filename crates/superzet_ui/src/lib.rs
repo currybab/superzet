@@ -1,5 +1,10 @@
 use anyhow::Result;
 use chrono::Utc;
+#[cfg(target_os = "macos")]
+use cocoa::{
+    base::{id, nil},
+    foundation::{NSAutoreleasePool, NSString},
+};
 use editor::{Editor, EditorEvent, actions::SelectAll};
 use git::repository::validate_worktree_directory;
 use git_ui::git_panel::GitPanel;
@@ -9,13 +14,29 @@ use gpui::{
     Point, PromptLevel, Subscription, Task, WeakEntity, WindowHandle, actions, anchored, deferred,
 };
 use menu;
+#[cfg(target_os = "macos")]
+use objc::{
+    class,
+    declare::ClassDecl,
+    msg_send,
+    runtime::{BOOL, Class, Object, Sel, YES},
+    sel, sel_impl,
+};
 use project::git_store::{GitStoreEvent, Repository, RepositoryEvent};
 use project::project_settings::ProjectSettings;
 use project_panel::ProjectPanel;
 use recent_projects::open_remote_project;
 use remote::{RemoteConnectionOptions, SshConnectionOptions};
 use settings::Settings;
+use smol::channel::Receiver as SmolReceiver;
+#[cfg(target_os = "macos")]
+use smol::channel::Sender as SmolSender;
 use std::{collections::BTreeMap, path::PathBuf, sync::Arc, time::Duration};
+#[cfg(target_os = "macos")]
+use std::{
+    ffi::{CStr, c_char},
+    sync::{Mutex, OnceLock},
+};
 use superzet_agent::{AGENT_TERMINAL_ID_ENV_VAR, AgentHookEvent, AgentHookEventType};
 use superzet_model::{
     AgentPreset, GitChangeSummary, ProjectEntry, ProjectLocation, StoredSshConnection,
@@ -70,6 +91,7 @@ struct WorkspaceAttentionController {
     terminal_ids_by_entity: BTreeMap<EntityId, String>,
     live_terminal_attention: BTreeMap<String, LiveTerminalAttention>,
     _hook_task: Task<Result<()>>,
+    _notification_activation_task: Task<Result<()>>,
 }
 
 impl WorkspaceAttentionController {
@@ -89,12 +111,25 @@ impl WorkspaceAttentionController {
                 Task::ready(Ok(()))
             }
         };
+        let notification_activation_task =
+            match take_native_terminal_notification_activation_receiver() {
+                Some(receiver) => cx.spawn(async move |this, cx| {
+                    while let Ok(workspace_id) = receiver.recv().await {
+                        this.update(cx, |this, cx| {
+                            this.handle_native_notification_activation(&workspace_id, cx);
+                        })?;
+                    }
+                    Ok(())
+                }),
+                None => Task::ready(Ok(())),
+            };
 
         Self {
             store,
             terminal_ids_by_entity: BTreeMap::new(),
             live_terminal_attention: BTreeMap::new(),
             _hook_task: hook_task,
+            _notification_activation_task: notification_activation_task,
         }
     }
 
@@ -267,6 +302,57 @@ impl WorkspaceAttentionController {
             && self.store.read(cx).active_workspace_id() == Some(workspace_id)
     }
 
+    fn handle_native_notification_activation(
+        &mut self,
+        workspace_id: &str,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(workspace_entry) = self.store.read(cx).workspace(workspace_id).cloned() else {
+            return;
+        };
+
+        cx.activate(true);
+
+        if let Some(target_window) = notification_window_for_workspace_entry(&workspace_entry, cx) {
+            if let Err(error) = target_window.update(cx, |multi_workspace, window, cx| {
+                let live_workspace = multi_workspace
+                    .workspaces()
+                    .iter()
+                    .find(|workspace| workspace_matches_entry(workspace, &workspace_entry, cx))
+                    .cloned();
+                window.activate_window();
+                if let Some(live_workspace) = live_workspace {
+                    multi_workspace.activate(live_workspace, cx);
+                }
+            }) {
+                log::error!("failed to activate workspace from notification: {error:#}");
+            }
+            return;
+        }
+
+        let Some(app_state) = WorkspaceAppState::try_global(cx).and_then(|state| state.upgrade())
+        else {
+            log::error!("failed to open workspace from notification: missing app state");
+            return;
+        };
+        let Some(target_window) = fallback_notification_window(cx) else {
+            log::error!("failed to open workspace from notification: no workspace window found");
+            return;
+        };
+
+        let open_task = match target_window.update(cx, |_, window, cx| {
+            window.activate_window();
+            open_workspace_entry(workspace_entry.clone(), app_state.clone(), window, cx)
+        }) {
+            Ok(open_task) => open_task,
+            Err(error) => {
+                log::error!("failed to dispatch workspace open from notification: {error:#}");
+                return;
+            }
+        };
+        open_task.detach_and_log_err(cx);
+    }
+
     fn maybe_show_native_notification(
         &self,
         notification: TerminalLifecycleNotification,
@@ -282,10 +368,7 @@ impl WorkspaceAttentionController {
         let title = notification.title().to_string();
         let body = format!("{workspace_name} in superzet");
 
-        cx.background_spawn(async move {
-            dispatch_native_terminal_notification(&title, &body);
-        })
-        .detach();
+        dispatch_native_terminal_notification(&title, &body, workspace_id);
     }
 }
 
@@ -3849,6 +3932,38 @@ fn workspace_for_entry_in_window(
         .filter(|workspace| workspace_matches_entry(workspace, workspace_entry, cx))
 }
 
+fn ordered_multi_workspace_windows(cx: &App) -> Vec<WindowHandle<MultiWorkspace>> {
+    cx.window_stack()
+        .unwrap_or_else(|| cx.windows())
+        .into_iter()
+        .filter_map(|window| window.downcast::<MultiWorkspace>())
+        .collect()
+}
+
+fn notification_window_for_workspace_entry(
+    workspace_entry: &WorkspaceEntry,
+    cx: &App,
+) -> Option<WindowHandle<MultiWorkspace>> {
+    ordered_multi_workspace_windows(cx)
+        .into_iter()
+        .find(|window| {
+            window
+                .read_with(cx, |multi_workspace, cx| {
+                    multi_workspace
+                        .workspaces()
+                        .iter()
+                        .any(|workspace| workspace_matches_entry(workspace, workspace_entry, cx))
+                })
+                .unwrap_or(false)
+        })
+}
+
+fn fallback_notification_window(cx: &App) -> Option<WindowHandle<MultiWorkspace>> {
+    cx.active_window()
+        .and_then(|window| window.downcast::<MultiWorkspace>())
+        .or_else(|| ordered_multi_workspace_windows(cx).into_iter().next())
+}
+
 fn active_repository_for_workspace(
     workspace: &Entity<Workspace>,
     cx: &App,
@@ -4184,19 +4299,172 @@ fn should_show_native_notification(
 }
 
 #[cfg(target_os = "macos")]
-fn dispatch_native_terminal_notification(title: &str, body: &str) {
-    let title = title.replace('\\', "\\\\").replace('"', "\\\"");
-    let body = body.replace('\\', "\\\\").replace('"', "\\\"");
-    let script = format!("display notification \"{body}\" with title \"{title}\"");
+#[link(name = "Foundation", kind = "framework")]
+unsafe extern "C" {
+    static NSUserNotificationDefaultSoundName: id;
+}
 
-    let mut command = smol::process::Command::new("/usr/bin/osascript");
-    if let Err(error) = command.arg("-e").arg(script).spawn() {
-        log::error!("failed to dispatch macOS notification: {error}");
+#[cfg(target_os = "macos")]
+struct NativeTerminalNotificationChannel {
+    sender: SmolSender<String>,
+    receiver: Mutex<Option<SmolReceiver<String>>>,
+}
+
+#[cfg(target_os = "macos")]
+fn native_terminal_notification_channel() -> &'static NativeTerminalNotificationChannel {
+    static CHANNEL: OnceLock<NativeTerminalNotificationChannel> = OnceLock::new();
+
+    CHANNEL.get_or_init(|| {
+        let (sender, receiver) = smol::channel::unbounded();
+        NativeTerminalNotificationChannel {
+            sender,
+            receiver: Mutex::new(Some(receiver)),
+        }
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn native_terminal_notification_delegate_class() -> &'static Class {
+    static DELEGATE_CLASS: OnceLock<&'static Class> = OnceLock::new();
+
+    DELEGATE_CLASS.get_or_init(|| unsafe {
+        if let Some(mut decl) =
+            ClassDecl::new("SuperzetNotificationCenterDelegate", class!(NSObject))
+        {
+            decl.add_method(
+                sel!(userNotificationCenter:didActivateNotification:),
+                native_terminal_notification_did_activate as extern "C" fn(&Object, Sel, id, id),
+            );
+            decl.add_method(
+                sel!(userNotificationCenter:shouldPresentNotification:),
+                native_terminal_notification_should_present
+                    as extern "C" fn(&Object, Sel, id, id) -> BOOL,
+            );
+            decl.register()
+        } else if let Some(existing_class) = Class::get("SuperzetNotificationCenterDelegate") {
+            existing_class
+        } else {
+            class!(NSObject)
+        }
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn install_native_terminal_notification_delegate() {
+    static DELEGATE: OnceLock<usize> = OnceLock::new();
+
+    let delegate = *DELEGATE.get_or_init(|| unsafe {
+        let delegate: id = msg_send![native_terminal_notification_delegate_class(), new];
+        delegate as usize
+    });
+
+    let center: id = unsafe {
+        msg_send![
+            class!(NSUserNotificationCenter),
+            defaultUserNotificationCenter
+        ]
+    };
+    unsafe {
+        let _: () = msg_send![center, setDelegate: delegate as id];
     }
 }
 
+#[cfg(target_os = "macos")]
+fn take_native_terminal_notification_activation_receiver() -> Option<SmolReceiver<String>> {
+    install_native_terminal_notification_delegate();
+
+    match native_terminal_notification_channel().receiver.lock() {
+        Ok(mut receiver) => receiver.take(),
+        Err(error) => {
+            log::error!("failed to subscribe to macOS notification activations: {error}");
+            None
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn dispatch_native_terminal_notification(title: &str, body: &str, workspace_id: &str) {
+    install_native_terminal_notification_delegate();
+
+    unsafe {
+        let pool = NSAutoreleasePool::new(nil);
+        let notification: id = msg_send![class!(NSUserNotification), new];
+        let center: id = msg_send![
+            class!(NSUserNotificationCenter),
+            defaultUserNotificationCenter
+        ];
+
+        let _: () = msg_send![notification, setTitle: ns_string(title)];
+        let _: () = msg_send![notification, setInformativeText: ns_string(body)];
+        let _: () = msg_send![notification, setIdentifier: ns_string(workspace_id)];
+        let _: () = msg_send![notification, setSoundName: NSUserNotificationDefaultSoundName];
+        let _: () = msg_send![center, deliverNotification: notification];
+        let _: () = msg_send![notification, release];
+        let _: () = msg_send![pool, drain];
+    }
+}
+
+#[cfg(target_os = "macos")]
+unsafe fn ns_string(string: &str) -> id {
+    unsafe { NSString::alloc(nil).init_str(string).autorelease() }
+}
+
+#[cfg(target_os = "macos")]
+unsafe fn ns_string_to_string(string: id) -> Option<String> {
+    if string == nil {
+        return None;
+    }
+
+    let bytes: *const c_char = unsafe { msg_send![string, UTF8String] };
+    (!bytes.is_null()).then(|| unsafe { CStr::from_ptr(bytes).to_string_lossy().into_owned() })
+}
+
+#[cfg(target_os = "macos")]
+extern "C" fn native_terminal_notification_did_activate(
+    _this: &Object,
+    _: Sel,
+    center: id,
+    notification: id,
+) {
+    unsafe {
+        let activation_type: isize = msg_send![notification, activationType];
+        if activation_type == 0 {
+            return;
+        }
+
+        let identifier: id = msg_send![notification, identifier];
+        let Some(workspace_id) = ns_string_to_string(identifier) else {
+            return;
+        };
+
+        if let Err(error) = native_terminal_notification_channel()
+            .sender
+            .try_send(workspace_id)
+        {
+            log::error!("failed to forward macOS notification activation: {error}");
+        }
+
+        let _: () = msg_send![center, removeDeliveredNotification: notification];
+    }
+}
+
+#[cfg(target_os = "macos")]
+extern "C" fn native_terminal_notification_should_present(
+    _this: &Object,
+    _: Sel,
+    _center: id,
+    _notification: id,
+) -> BOOL {
+    YES
+}
+
 #[cfg(not(target_os = "macos"))]
-fn dispatch_native_terminal_notification(_title: &str, _body: &str) {}
+fn dispatch_native_terminal_notification(_title: &str, _body: &str, _workspace_id: &str) {}
+
+#[cfg(not(target_os = "macos"))]
+fn take_native_terminal_notification_activation_receiver() -> Option<SmolReceiver<String>> {
+    None
+}
 
 fn workspace_notification_title(workspace: &WorkspaceEntry) -> String {
     match workspace.kind {
