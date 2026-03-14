@@ -1496,7 +1496,7 @@ pub(crate) async fn restore_or_create_workspace(
                     paths.paths().iter().map(PathBuf::from).collect(),
                     app_state,
                     workspace::OpenOptions {
-                        replace_window: primary_window.clone(),
+                        replace_window: primary_window,
                         ..Default::default()
                     },
                     cx,
