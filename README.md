@@ -1,8 +1,7 @@
 <p align="center">
   <img src="assets/branding/logo_nightly.png" alt="superzent" width="180" />
   <h1 align="center">superzent</h1>
-  <p align="center">A local-first workspace shell for coding agents.<br/>
-  Built on <a href="https://github.com/zed-industries/zed">Zed</a>, inspired by <a href="https://github.com/superset-sh/superset">superset</a>.</p>
+  <p align="center">Superzent is a fork of the <a href="https://github.com/zed-industries/zed">Zed</a> editor inspired by <a href="https://github.com/superset-sh/superset">superset.sh</a>,<br/> designed to make AI workflows a first-class part of the development environment.</p>
 </p>
 
 <p align="center">
