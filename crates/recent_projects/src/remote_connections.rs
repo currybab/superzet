@@ -143,8 +143,6 @@ pub async fn open_remote_project(
     open_options: workspace::OpenOptions,
     cx: &mut AsyncApp,
 ) -> Result<()> {
-    let created_new_window = open_options.replace_window.is_none();
-
     let (existing, open_visible) = find_existing_workspace(
         &paths,
         &open_options,
@@ -152,6 +150,8 @@ pub async fn open_remote_project(
         cx,
     )
     .await;
+
+    let mut reconnect_target = None;
 
     if let Some((existing_window, existing_workspace)) = existing {
         let remote_connection = cx.update(|cx| {
@@ -210,51 +210,85 @@ pub async fn open_remote_project(
         log::info!(
             "existing remote workspace found but connection is dead, starting fresh connection"
         );
+        let workspace_paths = cx.update(|cx| {
+            existing_workspace
+                .read(cx)
+                .root_paths(cx)
+                .iter()
+                .map(|path| path.to_path_buf())
+                .collect::<Vec<_>>()
+        });
+        let workspace_paths = if workspace_paths.is_empty() {
+            paths.clone()
+        } else {
+            workspace_paths
+        };
+        reconnect_target = Some((existing_window, existing_workspace, workspace_paths));
     }
 
-    let (window, initial_workspace) = if let Some(window) = open_options.replace_window {
-        let workspace = window.update(cx, |multi_workspace, _, _| {
-            multi_workspace.workspace().clone()
-        })?;
-        (window, workspace)
-    } else {
-        let workspace_position = cx
-            .update(|cx| {
-                workspace::remote_workspace_position_from_db(connection_options.clone(), &paths, cx)
-            })
-            .await
-            .context("fetching remote workspace position from db")?;
+    let (window, initial_workspace, created_new_window, workspace_to_replace, workspace_paths) =
+        if let Some((existing_window, existing_workspace, workspace_paths)) = reconnect_target {
+            (
+                existing_window,
+                existing_workspace.clone(),
+                false,
+                Some(existing_workspace),
+                workspace_paths,
+            )
+        } else if let Some(window) = open_options.replace_window {
+            let workspace = window.update(cx, |multi_workspace, _, _| {
+                multi_workspace.workspace().clone()
+            })?;
+            (window, workspace, false, None, paths.clone())
+        } else {
+            let workspace_position = cx
+                .update(|cx| {
+                    workspace::remote_workspace_position_from_db(
+                        connection_options.clone(),
+                        &paths,
+                        cx,
+                    )
+                })
+                .await
+                .context("fetching remote workspace position from db")?;
 
-        let mut options =
-            cx.update(|cx| (app_state.build_window_options)(workspace_position.display, cx));
-        options.window_bounds = workspace_position.window_bounds;
+            let mut options =
+                cx.update(|cx| (app_state.build_window_options)(workspace_position.display, cx));
+            options.window_bounds = workspace_position.window_bounds;
 
-        let window = cx.open_window(options, |window, cx| {
-            let project = project::Project::local(
-                app_state.client.clone(),
-                app_state.node_runtime.clone(),
-                app_state.user_store.clone(),
-                app_state.languages.clone(),
-                app_state.fs.clone(),
-                None,
-                project::LocalProjectFlags {
-                    init_worktree_trust: false,
-                    ..Default::default()
-                },
-                cx,
-            );
-            let workspace = cx.new(|cx| {
-                let mut workspace = Workspace::new(None, project, app_state.clone(), window, cx);
-                workspace.centered_layout = workspace_position.centered_layout;
-                workspace
-            });
-            cx.new(|cx| MultiWorkspace::new(workspace, window, cx))
-        })?;
-        let workspace = window.update(cx, |multi_workspace, _, _cx| {
-            multi_workspace.workspace().clone()
-        })?;
-        (window, workspace)
-    };
+            let window = cx.open_window(options, |window, cx| {
+                let project = project::Project::local(
+                    app_state.client.clone(),
+                    app_state.node_runtime.clone(),
+                    app_state.user_store.clone(),
+                    app_state.languages.clone(),
+                    app_state.fs.clone(),
+                    None,
+                    project::LocalProjectFlags {
+                        init_worktree_trust: false,
+                        ..Default::default()
+                    },
+                    cx,
+                );
+                let workspace = cx.new(|cx| {
+                    let mut workspace =
+                        Workspace::new(None, project, app_state.clone(), window, cx);
+                    workspace.centered_layout = workspace_position.centered_layout;
+                    workspace
+                });
+                cx.new(|cx| MultiWorkspace::new(workspace, window, cx))
+            })?;
+            let workspace = window.update(cx, |multi_workspace, _, _cx| {
+                multi_workspace.workspace().clone()
+            })?;
+            (
+                window,
+                workspace.clone(),
+                true,
+                Some(workspace),
+                paths.clone(),
+            )
+        };
 
     loop {
         let (cancel_tx, mut cancel_rx) = oneshot::channel();
@@ -356,7 +390,9 @@ pub async fn open_remote_project(
                     cancel_rx,
                     delegate.clone(),
                     app_state.clone(),
+                    workspace_paths.clone(),
                     paths.clone(),
+                    workspace_to_replace.clone(),
                     cx,
                 )
             })
@@ -584,6 +620,11 @@ mod tests {
 
         multi_workspace_handle
             .update(cx, |multi_workspace, _, cx| {
+                assert_eq!(
+                    multi_workspace.workspaces().len(),
+                    1,
+                    "opening a remote project in a new window should replace the temporary workspace"
+                );
                 let workspace = multi_workspace.workspace().clone();
                 workspace.update(cx, |workspace, cx| {
                     let project = workspace.project().read(cx);
@@ -855,11 +896,16 @@ mod tests {
             result.err()
         );
 
-        // Should still be a single window with a working remote project.
+        // Should still be a single window with a single working remote workspace.
         assert_eq!(cx.update(|cx| cx.windows().len()), 1);
 
         window
             .update(cx, |multi_workspace, _, cx| {
+                assert_eq!(
+                    multi_workspace.workspaces().len(),
+                    1,
+                    "reconnect should replace the disconnected workspace instead of adding another"
+                );
                 let workspace = multi_workspace.workspace().clone();
                 workspace.update(cx, |workspace, cx| {
                     assert!(

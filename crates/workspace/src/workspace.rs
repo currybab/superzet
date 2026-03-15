@@ -9091,12 +9091,14 @@ pub fn open_remote_project_with_new_connection(
     cancel_rx: oneshot::Receiver<()>,
     delegate: Arc<dyn RemoteClientDelegate>,
     app_state: Arc<AppState>,
-    paths: Vec<PathBuf>,
+    workspace_paths: Vec<PathBuf>,
+    paths_to_open: Vec<PathBuf>,
+    workspace_to_replace: Option<Entity<Workspace>>,
     cx: &mut App,
 ) -> Task<Result<Vec<Option<Box<dyn ItemHandle>>>>> {
     cx.spawn(async move |cx| {
         let (workspace_id, serialized_workspace) =
-            deserialize_remote_project(remote_connection.connection_options(), paths.clone(), cx)
+            deserialize_remote_project(remote_connection.connection_options(), workspace_paths, cx)
                 .await?;
 
         let session = match cx
@@ -9130,11 +9132,12 @@ pub fn open_remote_project_with_new_connection(
 
         open_remote_project_inner(
             project,
-            paths,
+            paths_to_open,
             workspace_id,
             serialized_workspace,
             app_state,
             window,
+            workspace_to_replace,
             cx,
         )
         .await
@@ -9160,6 +9163,7 @@ pub fn open_remote_project_with_existing_connection(
             serialized_workspace,
             app_state,
             window,
+            None,
             cx,
         )
         .await
@@ -9173,6 +9177,7 @@ async fn open_remote_project_inner(
     serialized_workspace: Option<SerializedWorkspace>,
     app_state: Arc<AppState>,
     window: WindowHandle<MultiWorkspace>,
+    workspace_to_replace: Option<Entity<Workspace>>,
     cx: &mut AsyncApp,
 ) -> Result<Vec<Option<Box<dyn ItemHandle>>>> {
     let toolchains = DB.toolchains(workspace_id).await?;
@@ -9217,7 +9222,8 @@ async fn open_remote_project_inner(
         return Err(project_path_errors.pop().context("no paths given")?);
     }
 
-    let workspace = window.update(cx, |multi_workspace, window, cx| {
+    let serialized_workspace_for_workspace = serialized_workspace.clone();
+    let workspace = window.update(cx, move |multi_workspace, window, cx| {
         telemetry::event!("SSH Project Opened");
 
         let new_workspace = cx.new(|cx| {
@@ -9225,14 +9231,23 @@ async fn open_remote_project_inner(
                 Workspace::new(Some(workspace_id), project, app_state.clone(), window, cx);
             workspace.update_history(cx);
 
-            if let Some(ref serialized) = serialized_workspace {
+            if let Some(ref serialized) = serialized_workspace_for_workspace {
                 workspace.centered_layout = serialized.centered_layout;
             }
 
             workspace
         });
 
-        multi_workspace.activate(new_workspace.clone(), cx);
+        let replaced = workspace_to_replace
+            .clone()
+            .is_some_and(|workspace_to_replace| {
+                multi_workspace.replace_workspace(workspace_to_replace, new_workspace.clone(), cx)
+            });
+
+        if !replaced {
+            multi_workspace.activate(new_workspace.clone(), cx);
+        }
+
         new_workspace
     })?;
 

@@ -353,6 +353,40 @@ impl MultiWorkspace {
         }
     }
 
+    pub fn replace_workspace(
+        &mut self,
+        workspace_to_replace: Entity<Workspace>,
+        new_workspace: Entity<Workspace>,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(index) = self
+            .workspaces
+            .iter()
+            .position(|workspace| *workspace == workspace_to_replace)
+        else {
+            return false;
+        };
+
+        if self.sidebar_open {
+            new_workspace.update(cx, |workspace, cx| {
+                workspace.set_workspace_sidebar_open(true, cx);
+            });
+        }
+
+        Self::subscribe_to_workspace(&new_workspace, cx);
+        let removed_workspace =
+            std::mem::replace(&mut self.workspaces[index], new_workspace.clone());
+        self.active_workspace_index = index;
+        self.serialize(cx);
+        cx.emit(MultiWorkspaceEvent::WorkspaceRemoved(
+            removed_workspace.entity_id(),
+        ));
+        cx.emit(MultiWorkspaceEvent::WorkspaceAdded(new_workspace));
+        cx.emit(MultiWorkspaceEvent::ActiveWorkspaceChanged);
+        cx.notify();
+        true
+    }
+
     pub fn activate_index(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
         debug_assert!(
             index < self.workspaces.len(),

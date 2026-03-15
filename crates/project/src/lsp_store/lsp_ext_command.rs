@@ -625,11 +625,30 @@ impl LspCommand for GetLspRunnables {
         let mut runnables = Vec::with_capacity(lsp_runnables.len());
 
         for runnable in lsp_runnables {
+            let target_uri = runnable
+                .location
+                .as_ref()
+                .map(|location| location.target_uri.to_string());
             let location = match runnable.location {
-                Some(location) => Some(
-                    location_link_from_lsp(location, &lsp_store, &buffer, server_id, &mut cx)
-                        .await?,
-                ),
+                Some(location) => match location_link_from_lsp(
+                    location,
+                    &lsp_store,
+                    &buffer,
+                    server_id,
+                    &mut cx,
+                )
+                .await
+                {
+                    Ok(location) => Some(location),
+                    Err(error) => {
+                        log::debug!(
+                            "Skipping unresolved LSP runnable location for `{}` ({}): {error}",
+                            runnable.label,
+                            target_uri.as_deref().unwrap_or("unknown target"),
+                        );
+                        None
+                    }
+                },
                 None => None,
             };
             let mut task_template = TaskTemplate::default();
@@ -756,14 +775,24 @@ impl LspCommand for GetLspRunnables {
         };
 
         for lsp_runnable in message.runnables {
+            let task_template: TaskTemplate =
+                serde_json::from_slice(&lsp_runnable.task_template)
+                .context("deserializing task template from proto")?;
             let location = match lsp_runnable.location {
                 Some(location) => {
-                    Some(location_link_from_proto(location, lsp_store.clone(), &mut cx).await?)
+                    match location_link_from_proto(location, lsp_store.clone(), &mut cx).await {
+                        Ok(location) => Some(location),
+                        Err(error) => {
+                            log::debug!(
+                                "Skipping unresolved proto LSP runnable location for `{}`: {error}",
+                                task_template.label,
+                            );
+                            None
+                        }
+                    }
                 }
                 None => None,
             };
-            let task_template = serde_json::from_slice(&lsp_runnable.task_template)
-                .context("deserializing task template from proto")?;
             runnables.runnables.push((location, task_template));
         }
 
