@@ -4471,7 +4471,10 @@ fn build_local_workspace_bundle(
     let project_location = ProjectLocation::Local {
         repo_root: project_root.clone(),
     };
-    let existing_project = store.project_for_location(&project_location).cloned();
+    let existing_workspace = store.workspace_for_location(&workspace_location).cloned();
+    let existing_project = store
+        .project_for_workspace_sync(existing_workspace.as_ref(), &project_location)
+        .cloned();
     let now = Utc::now();
     let project_id = existing_project
         .as_ref()
@@ -4495,7 +4498,6 @@ fn build_local_workspace_bundle(
         last_opened_at: now,
     };
 
-    let existing_workspace = store.workspace_for_location(&workspace_location).cloned();
     let kind = if let Some(existing_workspace) = &existing_workspace {
         existing_workspace.kind.clone()
     } else if existing_project.is_none()
@@ -4629,7 +4631,10 @@ fn build_remote_workspace_bundle(
         connection: connection.clone(),
         repo_root: repo_root.clone(),
     };
-    let existing_project = store.project_for_location(&project_location).cloned();
+    let existing_workspace = store.workspace_for_location(&workspace_location).cloned();
+    let existing_project = store
+        .project_for_workspace_sync(existing_workspace.as_ref(), &project_location)
+        .cloned();
     let now = Utc::now();
     let project_id = existing_project
         .as_ref()
@@ -4653,7 +4658,6 @@ fn build_remote_workspace_bundle(
         last_opened_at: now,
     };
 
-    let existing_workspace = store.workspace_for_location(&workspace_location).cloned();
     let kind = if let Some(existing_workspace) = &existing_workspace {
         existing_workspace.kind.clone()
     } else if existing_project.is_none() {

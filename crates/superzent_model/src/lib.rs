@@ -591,6 +591,16 @@ impl SuperzentStore {
         }
     }
 
+    pub fn project_for_workspace_sync(
+        &self,
+        existing_workspace: Option<&WorkspaceEntry>,
+        project_location: &ProjectLocation,
+    ) -> Option<&ProjectEntry> {
+        existing_workspace
+            .and_then(|workspace| self.project(&workspace.project_id))
+            .or_else(|| self.project_for_location(project_location))
+    }
+
     pub fn primary_workspace_for_project(&self, project_id: &str) -> Option<&WorkspaceEntry> {
         self.state
             .workspaces
@@ -1996,6 +2006,54 @@ mod tests {
         }
     }
 
+    fn remote_project_entry(
+        id: &str,
+        connection: StoredSshConnection,
+        repo_root: &str,
+    ) -> ProjectEntry {
+        ProjectEntry {
+            id: id.to_string(),
+            name: id.to_string(),
+            location: ProjectLocation::Ssh {
+                connection,
+                repo_root: repo_root.to_string(),
+            },
+            collapsed: false,
+            created_at: Utc::now(),
+            last_opened_at: Utc::now(),
+        }
+    }
+
+    fn remote_workspace_entry(
+        id: &str,
+        project_id: &str,
+        kind: WorkspaceKind,
+        connection: StoredSshConnection,
+        worktree_path: &str,
+    ) -> WorkspaceEntry {
+        WorkspaceEntry {
+            id: id.to_string(),
+            project_id: project_id.to_string(),
+            kind,
+            name: id.to_string(),
+            display_name: None,
+            branch: "main".to_string(),
+            location: WorkspaceLocation::Ssh {
+                connection,
+                worktree_path: worktree_path.to_string(),
+            },
+            agent_preset_id: "codex".to_string(),
+            managed: false,
+            git_status: WorkspaceGitStatus::Available,
+            git_summary: None,
+            attention_status: WorkspaceAttentionStatus::Idle,
+            review_pending: false,
+            last_attention_reason: None,
+            created_at: Utc::now(),
+            last_opened_at: Utc::now(),
+        }
+    }
+
     #[test]
     fn update_workspace_metadata_ignores_missing_branch_when_summary_is_unchanged() {
         let mut workspace = workspace_entry(
@@ -2087,6 +2145,102 @@ mod tests {
             .workspace_for_path_or_ancestor(Path::new("/tmp/repo/feature/src/main.rs"))
             .expect("workspace should resolve");
         assert_eq!(workspace.id, "worktree");
+    }
+
+    #[test]
+    fn existing_local_workspace_keeps_its_project_during_sync() {
+        let project_a = project_entry("project-a", "/tmp/repo");
+        let project_b = project_entry("project-b", "/tmp/repo");
+        let workspace = workspace_entry(
+            "workspace",
+            "project-b",
+            WorkspaceKind::Worktree,
+            "/tmp/repo-worktrees/feature",
+        );
+
+        let store = SuperzentStore {
+            state_path: PathBuf::from("/tmp/state.json"),
+            state: SuperzentState {
+                projects: vec![project_a, project_b.clone()],
+                workspaces: vec![workspace.clone()],
+                ..Default::default()
+            },
+        };
+
+        let resolved = store
+            .project_for_workspace_sync(
+                Some(&workspace),
+                &ProjectLocation::Local {
+                    repo_root: PathBuf::from("/tmp/repo"),
+                },
+            )
+            .expect("workspace project should resolve");
+
+        assert_eq!(resolved.id, project_b.id);
+    }
+
+    #[test]
+    fn existing_remote_workspace_keeps_its_project_during_sync() {
+        let connection = StoredSshConnection {
+            host: "example.com".to_string(),
+            username: Some("jun".to_string()),
+            port: Some(2222),
+            ..Default::default()
+        };
+        let project_a = remote_project_entry("project-a", connection.clone(), "/srv/repo");
+        let project_b = remote_project_entry("project-b", connection.clone(), "/srv/repo");
+        let workspace = remote_workspace_entry(
+            "workspace",
+            "project-b",
+            WorkspaceKind::Worktree,
+            connection.clone(),
+            "/srv/worktrees/feature",
+        );
+
+        let store = SuperzentStore {
+            state_path: PathBuf::from("/tmp/state.json"),
+            state: SuperzentState {
+                projects: vec![project_a, project_b.clone()],
+                workspaces: vec![workspace.clone()],
+                ..Default::default()
+            },
+        };
+
+        let resolved = store
+            .project_for_workspace_sync(
+                Some(&workspace),
+                &ProjectLocation::Ssh {
+                    connection,
+                    repo_root: "/srv/repo".to_string(),
+                },
+            )
+            .expect("workspace project should resolve");
+
+        assert_eq!(resolved.id, project_b.id);
+    }
+
+    #[test]
+    fn new_workspace_falls_back_to_matching_project_location_during_sync() {
+        let project = project_entry("project-a", "/tmp/repo");
+
+        let store = SuperzentStore {
+            state_path: PathBuf::from("/tmp/state.json"),
+            state: SuperzentState {
+                projects: vec![project.clone()],
+                ..Default::default()
+            },
+        };
+
+        let resolved = store
+            .project_for_workspace_sync(
+                None,
+                &ProjectLocation::Local {
+                    repo_root: PathBuf::from("/tmp/repo"),
+                },
+            )
+            .expect("matching project should resolve");
+
+        assert_eq!(resolved.id, project.id);
     }
 
     #[test]
