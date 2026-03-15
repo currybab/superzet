@@ -1,5 +1,5 @@
 use crate::{
-    Copy, CopyAndTrim, CopyPermalinkToLine, Cut, DisplayPoint, DisplaySnapshot, Editor,
+    Copy, CopyAndTrim, CopyFileLocation, CopyPermalinkToLine, Cut, DisplayPoint, DisplaySnapshot, Editor,
     EvaluateSelectedText, FindAllReferences, GoToDeclaration, GoToDefinition, GoToImplementation,
     GoToTypeDefinition, Paste, Rename, RevealInFileManager, RunToCursor, SelectMode,
     SelectionEffects, SelectionExt, ToDisplayPoint, ToggleCodeActions,
@@ -205,6 +205,9 @@ pub fn deploy_context_menu(
             .all::<PointUtf16>(&display_map)
             .into_iter()
             .any(|s| !s.is_empty());
+        let has_file_location = editor
+            .active_excerpt(cx)
+            .is_some_and(|(_, buffer, _)| buffer.read(cx).file().is_some());
         let has_git_repo = buffer
             .buffer_id_for_anchor(anchor)
             .is_some_and(|buffer_id| {
@@ -282,6 +285,11 @@ pub fn deploy_context_menu(
                 .action("Cut", Box::new(Cut))
                 .action("Copy", Box::new(Copy))
                 .action("Copy and Trim", Box::new(CopyAndTrim))
+                .action_disabled_when(
+                    !has_file_location,
+                    "Copy File Location",
+                    Box::new(CopyFileLocation),
+                )
                 .action("Paste", Box::new(Paste))
                 .separator()
                 .action_disabled_when(

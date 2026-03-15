@@ -11,10 +11,15 @@ path = "src/lib.rs"
 [lints]
 workspace = true
 
+[features]
+acp_tabs = ["dep:agent_ui", "dep:fs", "dep:schemars", "dep:serde"]
+
 [dependencies]
+agent_ui = { workspace = true, optional = true }
 anyhow.workspace = true
 chrono.workspace = true
 editor.workspace = true
+fs = { workspace = true, optional = true }
 git.workspace = true
 git_ui.workspace = true
 gpui.workspace = true
@@ -24,6 +29,8 @@ project.workspace = true
 project_panel.workspace = true
 recent_projects.workspace = true
 remote.workspace = true
+schemars = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
 settings.workspace = true
 smol.workspace = true
 superzent_git.workspace = true

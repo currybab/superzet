@@ -93,6 +93,13 @@ impl AgentRegistryPage {
     ) -> Entity<Self> {
         cx.new(|cx| {
             let registry_store = AgentRegistryStore::global(cx);
+            let initial_state = registry_store.read(cx);
+            log::info!(
+                "Creating ACP Registry page: agents={}, is_fetching={}, fetch_error={:?}",
+                initial_state.agents().len(),
+                initial_state.is_fetching(),
+                initial_state.fetch_error()
+            );
             let query_editor = cx.new(|cx| {
                 let mut input = Editor::single_line(window, cx);
                 input.set_placeholder_text("Search agents...", window, cx);
@@ -128,7 +135,14 @@ impl AgentRegistryPage {
     }
 
     fn reload_registry_agents(&mut self, cx: &mut Context<Self>) {
-        self.registry_agents = self.registry_store.read(cx).agents().to_vec();
+        let registry_store = self.registry_store.read(cx);
+        log::info!(
+            "Reloading ACP Registry page: agents={}, is_fetching={}, fetch_error={:?}",
+            registry_store.agents().len(),
+            registry_store.is_fetching(),
+            registry_store.fetch_error()
+        );
+        self.registry_agents = registry_store.agents().to_vec();
         self.registry_agents.sort_by(|left, right| {
             left.name()
                 .as_ref()

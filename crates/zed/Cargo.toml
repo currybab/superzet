@@ -14,25 +14,29 @@ workspace = true
 [features]
 # Default local builds stay on the lightweight single-user shell surface.
 # Use `--features full` to opt back into the upstream-like AI/collab stack.
-default = ["lite"]
+default = ["lite", "acp_tabs"]
 lite = []
+acp_tabs = [
+    "dep:agent",
+    "dep:agent_ui",
+    "dep:language_model",
+    "dep:language_models",
+    "dep:web_search_providers",
+    "superzent_ui/acp_tabs",
+]
 calls = ["dep:audio", "dep:call", "title_bar/calls"]
 collab = ["calls", "dep:channel", "dep:collab_ui"]
 ai = [
+    "acp_tabs",
     "dep:acp_thread",
     "dep:acp_tools",
-    "dep:agent",
     "dep:agent-client-protocol",
     "dep:agent_settings",
-    "dep:agent_ui",
     "dep:codestral",
     "dep:copilot",
     "dep:copilot_chat",
     "dep:edit_prediction",
     "dep:edit_prediction_ui",
-    "dep:language_model",
-    "dep:language_models",
-    "dep:web_search_providers",
     "git_ui/ai",
     "language_tools/edit-prediction",
     "settings_ui/ai",

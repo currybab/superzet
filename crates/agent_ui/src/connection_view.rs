@@ -1175,6 +1175,16 @@ impl ConnectionView {
         }
     }
 
+    pub fn tab_title(&self, cx: &App) -> SharedString {
+        match &self.server_state {
+            ServerState::Connected(_) => self
+                .parent_thread(cx)
+                .map(|thread| thread.read(cx).thread.read(cx).title())
+                .unwrap_or_else(|| "New Thread".into()),
+            ServerState::Loading(_) | ServerState::LoadError { .. } => self.title(cx),
+        }
+    }
+
     pub fn cancel_generation(&mut self, cx: &mut Context<Self>) {
         if let Some(active) = self.active_thread() {
             active.update(cx, |active, cx| {
@@ -1185,6 +1195,16 @@ impl ConnectionView {
 
     // The parent ID is None if we haven't created a thread yet
     pub fn parent_id(&self, cx: &App) -> Option<acp::SessionId> {
+        match &self.server_state {
+            ServerState::Connected(_) => self
+                .parent_thread(cx)
+                .map(|thread| thread.read(cx).id.clone()),
+            ServerState::Loading(loading) => loading.read(cx).session_id.clone(),
+            ServerState::LoadError { session_id, .. } => session_id.clone(),
+        }
+    }
+
+    pub fn session_id(&self, cx: &App) -> Option<acp::SessionId> {
         match &self.server_state {
             ServerState::Connected(_) => self
                 .parent_thread(cx)

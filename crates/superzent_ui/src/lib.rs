@@ -1,3 +1,8 @@
+#[cfg(feature = "acp_tabs")]
+mod acp_tabs;
+#[cfg(feature = "acp_tabs")]
+pub use acp_tabs::{FocusAcpTab, NewAcpTab, OpenAcpHistory};
+
 use anyhow::Result;
 use chrono::Utc;
 #[cfg(target_os = "macos")]
@@ -12,6 +17,7 @@ use gpui::{
     Action, Animation, AnimationExt, App, AsyncWindowContext, ClickEvent, DismissEvent, Entity,
     EntityId, EventEmitter, FocusHandle, Focusable, MouseButton, MouseDownEvent, PathPromptOptions,
     Point, PromptLevel, Subscription, Task, WeakEntity, WindowHandle, actions, anchored, deferred,
+    px,
 };
 use menu;
 #[cfg(target_os = "macos")]
@@ -22,6 +28,12 @@ use objc::{
     runtime::{BOOL, Class, Object, Sel, YES},
     sel, sel_impl,
 };
+#[cfg(feature = "acp_tabs")]
+use project::agent_server_store::{CLAUDE_AGENT_NAME, CODEX_NAME, GEMINI_NAME};
+#[cfg(feature = "acp_tabs")]
+use project::agent_server_store::{AllAgentServersSettings, CustomAgentServerSettings};
+#[cfg(feature = "acp_tabs")]
+use project::AgentRegistryStore;
 use project::git_store::{GitStoreEvent, Repository, RepositoryEvent};
 use project::project_settings::ProjectSettings;
 use project_panel::ProjectPanel;
@@ -44,16 +56,17 @@ use std::{
 };
 use superzent_agent::{AGENT_TERMINAL_ID_ENV_VAR, AgentHookEvent, AgentHookEventType};
 use superzent_model::{
-    AgentPreset, GitChangeSummary, ProjectEntry, ProjectLocation, StoredSshConnection,
-    StoredSshPortForward, SuperzentStore, TaskStatus, WorkspaceAttentionStatus, WorkspaceEntry,
-    WorkspaceGitStatus, WorkspaceKind, WorkspaceLocation, aggregate_workspace_attention_status,
+    AgentPreset, GitChangeSummary, PresetLaunchMode, ProjectEntry, ProjectLocation,
+    StoredSshConnection, StoredSshPortForward, SuperzentStore, TaskStatus,
+    WorkspaceAttentionStatus, WorkspaceEntry, WorkspaceGitStatus, WorkspaceKind,
+    WorkspaceLocation, aggregate_workspace_attention_status,
 };
 use task::{Shell, ShellKind};
 use terminal::terminal_settings::{TerminalAgentNotificationMode, TerminalSettings};
 use terminal_view::{TerminalView, terminal_panel::TerminalPanel};
 use ui::{
-    ButtonLike, Chip, ContextMenu, DropdownMenu, DropdownStyle, Indicator, ListItem, Tab, Tooltip,
-    prelude::*,
+    ButtonLike, Chip, ContextMenu, DropdownMenu, DropdownStyle, Icon, Indicator, ListItem, Tab,
+    Tooltip, prelude::*,
 };
 use uuid::Uuid;
 use workspace::{
@@ -63,7 +76,11 @@ use workspace::{
     notifications::NotificationId,
     workspace_windows_for_location,
 };
+#[cfg(feature = "acp_tabs")]
+use zed_actions::AcpRegistry;
 use zed_actions::{OpenRemote, OpenSettingsAt};
+#[cfg(feature = "acp_tabs")]
+use agent_ui::open_external_acp_tab;
 
 actions!(
     superzent,
@@ -396,6 +413,9 @@ pub fn init(cx: &mut App) {
         return;
     }
 
+    #[cfg(feature = "acp_tabs")]
+    acp_tabs::init(cx);
+
     let attention_controller = cx.new(WorkspaceAttentionController::new);
 
     cx.observe_new(
@@ -498,7 +518,6 @@ fn render_terminal_preset_bar(
             cx,
         )
     });
-
     Some(
         h_flex()
             .id(format!("superzent-preset-bar-{}", workspace_entry.id))
@@ -528,18 +547,11 @@ fn render_terminal_preset_bar(
                     .items_center()
                     .gap_1()
                     .children(hidden_dropdown)
-                    .child(
-                        IconButton::new(
-                            format!("superzent-preset-settings-{}", workspace_entry.id),
-                            IconName::Settings,
-                        )
-                        .shape(ui::IconButtonShape::Square)
-                        .style(ButtonStyle::Subtle)
-                        .tooltip(|window, cx| Tooltip::text("Open agent presets")(window, cx))
-                        .on_click(move |_, window, cx| {
-                            open_agent_presets_settings(window, cx);
-                        }),
-                    ),
+                    .child(render_preset_actions_dropdown(
+                        &workspace_entry.id,
+                        window,
+                        cx,
+                    )),
             )
             .into_any_element(),
     )
@@ -677,6 +689,42 @@ fn open_agent_presets_settings(window: &mut Window, cx: &mut App) {
     );
 }
 
+fn render_preset_actions_dropdown(
+    workspace_id: &str,
+    window: &mut Window,
+    cx: &mut Context<Pane>,
+) -> AnyElement {
+    let menu = ContextMenu::build(window, cx, move |mut menu, _, _| {
+        menu = menu.entry("Agent Presets", None, |window, cx| {
+            open_agent_presets_settings(window, cx);
+        });
+
+        #[cfg(feature = "acp_tabs")]
+        {
+            menu = menu.entry("ACP Registry", None, |window, cx| {
+                open_acp_registry(window, cx);
+            });
+        }
+
+        menu
+    });
+
+    DropdownMenu::new_with_element(
+        format!("superzent-preset-actions-{workspace_id}"),
+        Icon::new(IconName::Settings).into_any_element(),
+        menu,
+    )
+    .style(DropdownStyle::Ghost)
+    .trigger_tooltip(|window, cx| Tooltip::text("Preset and ACP options")(window, cx))
+    .no_chevron()
+    .into_any_element()
+}
+
+#[cfg(feature = "acp_tabs")]
+fn open_acp_registry(window: &mut Window, cx: &mut App) {
+    window.dispatch_action(Box::new(AcpRegistry), cx);
+}
+
 fn launch_workspace_preset(
     workspace_handle: Entity<Workspace>,
     workspace_entry: WorkspaceEntry,
@@ -698,18 +746,139 @@ fn launch_workspace_preset(
     store.update(cx, |store, cx| {
         store.set_workspace_agent_preset(&workspace_entry.id, &preset.id, cx);
     });
-    if let Some(task_prompt) = task_prompt.filter(|task_prompt| !task_prompt.trim().is_empty()) {
-        launch_workspace_preset_task(
-            workspace_handle,
-            workspace_entry,
-            preset,
-            task_prompt,
-            window,
+    let task_prompt = task_prompt.filter(|task_prompt| !task_prompt.trim().is_empty());
+    match preset.launch_mode {
+        PresetLaunchMode::Terminal => {
+            if let Some(task_prompt) = task_prompt {
+                launch_workspace_preset_task(
+                    workspace_handle,
+                    workspace_entry,
+                    preset,
+                    task_prompt,
+                    window,
+                    cx,
+                );
+            } else {
+                launch_workspace_preset_in_terminal(
+                    workspace_handle,
+                    workspace_entry,
+                    preset,
+                    window,
+                    cx,
+                );
+            }
+        }
+        PresetLaunchMode::Acp => {
+            launch_workspace_preset_as_acp(workspace_handle, preset, task_prompt, window, cx);
+        }
+    }
+}
+
+#[cfg(feature = "acp_tabs")]
+fn launch_workspace_preset_as_acp(
+    workspace_handle: Entity<Workspace>,
+    preset: AgentPreset,
+    task_prompt: Option<String>,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let Some(agent_name) = preset.resolved_acp_agent_name() else {
+        show_workspace_toast(
+            &workspace_handle,
+            format!("{} is missing an ACP agent name.", preset.label),
             cx,
         );
-    } else {
-        launch_workspace_preset_in_terminal(workspace_handle, workspace_entry, preset, window, cx);
+        return;
+    };
+
+    acp_tabs::ensure_promoted_agent_enabled(&agent_name, cx);
+    refresh_registry_agent_if_needed(&agent_name, cx);
+    let workspace_for_launch = workspace_handle.clone();
+    window
+        .spawn(cx, async move |cx| {
+            match wait_for_acp_agent_registration(&workspace_handle, agent_name.as_ref(), cx).await
+            {
+                AcpAgentRegistrationWaitResult::Registered => {}
+                AcpAgentRegistrationWaitResult::RegistryFetchFailed(error) => {
+                    show_workspace_toast_async(
+                        &workspace_handle,
+                        format!("Failed to load ACP Registry for `{agent_name}`: {error}"),
+                        cx,
+                    );
+                    return Ok::<(), anyhow::Error>(());
+                }
+                AcpAgentRegistrationWaitResult::TimedOut => {
+                    show_workspace_toast_async(
+                        &workspace_handle,
+                        acp_agent_loading_message(&agent_name),
+                        cx,
+                    );
+                    return Ok::<(), anyhow::Error>(());
+                }
+            }
+
+            let _ = workspace_for_launch.update_in(cx, |workspace, window, cx| {
+                open_external_acp_tab(
+                    workspace,
+                    Some(agent_name.clone()),
+                    task_prompt.clone(),
+                    window,
+                    cx,
+                );
+            });
+            Ok::<(), anyhow::Error>(())
+        })
+        .detach();
+}
+
+#[cfg(feature = "acp_tabs")]
+fn refresh_registry_agent_if_needed(agent_name: &str, cx: &mut App) {
+    let uses_registry = matches!(agent_name, CLAUDE_AGENT_NAME | CODEX_NAME | GEMINI_NAME)
+        || cx
+            .global::<settings::SettingsStore>()
+            .get::<AllAgentServersSettings>(None)
+            .get(agent_name)
+            .is_some_and(|settings| matches!(settings, CustomAgentServerSettings::Registry { .. }));
+
+    if !uses_registry {
+        return;
     }
+
+    if let Some(registry_store) = AgentRegistryStore::try_global(cx) {
+        let should_refresh = {
+            let registry_store = registry_store.read(cx);
+            registry_store.agent(agent_name).is_none() || registry_store.fetch_error().is_some()
+        };
+        if should_refresh {
+            registry_store.update(cx, |registry_store, cx| registry_store.refresh(cx));
+        }
+    }
+}
+
+#[cfg(feature = "acp_tabs")]
+fn acp_agent_loading_message(agent_name: &str) -> String {
+    if matches!(agent_name, CLAUDE_AGENT_NAME | CODEX_NAME | GEMINI_NAME) {
+        format!(
+            "ACP agent `{agent_name}` is still loading from the ACP Registry. Open ACP Registry or try again in a moment."
+        )
+    } else {
+        format!("ACP agent `{agent_name}` is still loading. Try again in a moment.")
+    }
+}
+
+#[cfg(not(feature = "acp_tabs"))]
+fn launch_workspace_preset_as_acp(
+    workspace_handle: Entity<Workspace>,
+    preset: AgentPreset,
+    _task_prompt: Option<String>,
+    _window: &mut Window,
+    cx: &mut App,
+) {
+    show_workspace_toast(
+        &workspace_handle,
+        format!("{} requires ACP support in this build.", preset.label),
+        cx,
+    );
 }
 
 fn launch_workspace_preset_in_terminal(
@@ -779,6 +948,62 @@ fn launch_workspace_preset_in_terminal(
             Ok::<(), anyhow::Error>(())
         })
         .detach();
+}
+
+#[cfg(feature = "acp_tabs")]
+enum AcpAgentRegistrationWaitResult {
+    Registered,
+    RegistryFetchFailed(String),
+    TimedOut,
+}
+
+#[cfg(feature = "acp_tabs")]
+async fn wait_for_acp_agent_registration(
+    workspace_handle: &Entity<Workspace>,
+    agent_name: &str,
+    cx: &mut AsyncWindowContext,
+) -> AcpAgentRegistrationWaitResult {
+    for _ in 0..150 {
+        let state = workspace_handle
+            .read_with(cx, |workspace, cx| {
+                let agent_server_store = workspace.project().read(cx).agent_server_store().clone();
+                if agent_server_store
+                    .read(cx)
+                    .external_agents()
+                    .any(|registered_name| registered_name.0.as_ref() == agent_name)
+                {
+                    return AcpAgentRegistrationWaitResult::Registered;
+                }
+
+                let Some(registry_store) = AgentRegistryStore::try_global(cx) else {
+                    return AcpAgentRegistrationWaitResult::TimedOut;
+                };
+                let registry_store = registry_store.read(cx);
+                if let Some(error) = registry_store.fetch_error()
+                    && !registry_store.is_fetching()
+                    && registry_store.agent(agent_name).is_none()
+                {
+                    return AcpAgentRegistrationWaitResult::RegistryFetchFailed(error.to_string());
+                }
+
+                AcpAgentRegistrationWaitResult::TimedOut
+            });
+        match state {
+            AcpAgentRegistrationWaitResult::Registered => {
+                return AcpAgentRegistrationWaitResult::Registered;
+            }
+            AcpAgentRegistrationWaitResult::RegistryFetchFailed(error) => {
+                return AcpAgentRegistrationWaitResult::RegistryFetchFailed(error);
+            }
+            AcpAgentRegistrationWaitResult::TimedOut => {}
+        }
+
+        cx.background_executor()
+            .timer(Duration::from_millis(200))
+            .await;
+    }
+
+    AcpAgentRegistrationWaitResult::TimedOut
 }
 
 fn launch_workspace_preset_task(

@@ -11,6 +11,7 @@ pub(crate) mod connection_view;
 mod context;
 mod context_server_configuration;
 mod entry_view_state;
+mod external_tabs;
 mod favorite_models;
 mod inline_assistant;
 mod inline_prompt_editor;
@@ -62,6 +63,9 @@ pub use crate::agent_panel::{
     AgentPanel, AgentPanelEvent, ConcreteAssistantPanelDelegate, WorktreeCreationStatus,
 };
 use crate::agent_registry_ui::AgentRegistryPage;
+pub use crate::external_tabs::{
+    focus_external_acp_tab, open_external_acp_history, open_external_acp_tab,
+};
 pub use crate::inline_assistant::InlineAssistant;
 pub use agent_diff::{AgentDiffPane, AgentDiffToolbar};
 pub(crate) use connection_view::ConnectionView;
@@ -199,6 +203,12 @@ pub struct NewExternalAgentThread {
     agent: Option<ExternalAgent>,
 }
 
+impl NewExternalAgentThread {
+    pub fn agent(&self) -> Option<&ExternalAgent> {
+        self.agent.as_ref()
+    }
+}
+
 #[derive(Clone, PartialEq, Deserialize, JsonSchema, Action)]
 #[action(namespace = agent)]
 #[serde(deny_unknown_fields)]
@@ -309,38 +319,7 @@ pub fn init(
         ConfigureContextServerModal::register(workspace, language_registry.clone(), window, cx)
     })
     .detach();
-    cx.observe_new(|workspace: &mut Workspace, _window, _cx| {
-        workspace.register_action(
-            move |workspace: &mut Workspace,
-                  _: &zed_actions::AcpRegistry,
-                  window: &mut Window,
-                  cx: &mut Context<Workspace>| {
-                let existing = workspace
-                    .active_pane()
-                    .read(cx)
-                    .items()
-                    .find_map(|item| item.downcast::<AgentRegistryPage>());
-
-                if let Some(existing) = existing {
-                    existing.update(cx, |_, cx| {
-                        project::AgentRegistryStore::global(cx)
-                            .update(cx, |store, cx| store.refresh(cx));
-                    });
-                    workspace.activate_item(&existing, true, true, window, cx);
-                } else {
-                    let registry_page = AgentRegistryPage::new(workspace, window, cx);
-                    workspace.add_item_to_active_pane(
-                        Box::new(registry_page),
-                        None,
-                        true,
-                        window,
-                        cx,
-                    );
-                }
-            },
-        );
-    })
-    .detach();
+    register_acp_registry_action(cx);
     cx.observe_new(ManageProfilesModal::register).detach();
 
     // Update command palette filter based on AI settings
@@ -355,6 +334,64 @@ pub fn init(
 
     cx.on_flags_ready(|_, cx| {
         update_command_palette_filter(cx);
+    })
+    .detach();
+}
+
+pub fn init_external_agent_tabs(
+    fs: Arc<dyn Fs>,
+    language_registry: Arc<LanguageRegistry>,
+    is_eval: bool,
+    cx: &mut App,
+) {
+    rules_library::init(cx);
+    if !is_eval {
+        init_language_model_settings(cx);
+    }
+    assistant_slash_command::init(cx);
+    context_server_configuration::init(language_registry.clone(), fs, cx);
+    register_slash_commands(cx);
+    cx.observe_new(move |workspace, window, cx| {
+        ConfigureContextServerModal::register(workspace, language_registry.clone(), window, cx)
+    })
+    .detach();
+    register_acp_registry_action(cx);
+}
+
+fn register_acp_registry_action(cx: &mut App) {
+    cx.observe_new(|workspace: &mut Workspace, _window, _cx| {
+        workspace.register_action(
+            move |workspace: &mut Workspace,
+                  _: &zed_actions::AcpRegistry,
+                  window: &mut Window,
+                  cx: &mut Context<Workspace>| {
+                log::info!("ACP Registry action triggered");
+                let existing = workspace
+                    .active_pane()
+                    .read(cx)
+                    .items()
+                    .find_map(|item| item.downcast::<AgentRegistryPage>());
+
+                if let Some(existing) = existing {
+                    log::info!("ACP Registry page already open; refreshing existing page");
+                    existing.update(cx, |_, cx| {
+                        project::AgentRegistryStore::global(cx)
+                            .update(cx, |store, cx| store.refresh(cx));
+                    });
+                    workspace.activate_item(&existing, true, true, window, cx);
+                } else {
+                    log::info!("Opening new ACP Registry page");
+                    let registry_page = AgentRegistryPage::new(workspace, window, cx);
+                    workspace.add_item_to_active_pane(
+                        Box::new(registry_page),
+                        None,
+                        true,
+                        window,
+                        cx,
+                    );
+                }
+            },
+        );
     })
     .detach();
 }

@@ -9,10 +9,6 @@ use futures::AsyncReadExt;
 use gpui::{App, AppContext as _, Context, Entity, Global, SharedString, Task};
 use http_client::{AsyncBody, HttpClient};
 use serde::Deserialize;
-use settings::Settings as _;
-
-use crate::DisableAiSettings;
-
 const REGISTRY_URL: &str = "https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json";
 const REFRESH_THROTTLE_DURATION: Duration = Duration::from_secs(60 * 60);
 
@@ -168,13 +164,15 @@ impl AgentRegistryStore {
     /// This will fetch the latest registry data and update the cache.
     pub fn refresh(&mut self, cx: &mut Context<Self>) {
         if self.pending_refresh.is_some() {
+            log::info!("AgentRegistryStore::refresh skipped: fetch already in progress");
             return;
         }
 
-        if DisableAiSettings::get_global(cx).disable_ai {
-            return;
-        }
-
+        log::info!(
+            "AgentRegistryStore::refresh starting: url={}, cache_path={}",
+            REGISTRY_URL,
+            registry_cache_path().display()
+        );
         self.is_fetching = true;
         self.fetch_error = None;
         self.last_refresh = Some(Instant::now());
@@ -200,10 +198,15 @@ impl AgentRegistryStore {
                 this.is_fetching = false;
                 match result {
                     Ok(agents) => {
+                        log::info!(
+                            "AgentRegistryStore::refresh succeeded: {} agents loaded",
+                            agents.len()
+                        );
                         this.agents = agents;
                         this.fetch_error = None;
                     }
                     Err(error) => {
+                        log::error!("AgentRegistryStore::refresh failed: {error:#}");
                         this.fetch_error = Some(SharedString::from(error.to_string()));
                     }
                 }
@@ -251,16 +254,20 @@ impl AgentRegistryStore {
         http_client: Arc<dyn HttpClient>,
         cx: &mut Context<Self>,
     ) {
-        if DisableAiSettings::get_global(cx).disable_ai {
-            return;
-        }
-
         cx.spawn(async move |this, cx| -> Result<()> {
             let cache_path = registry_cache_path();
             if !fs.is_file(&cache_path).await {
+                log::info!(
+                    "AgentRegistryStore::load_cached_registry: no cache at {}",
+                    cache_path.display()
+                );
                 return Ok(());
             }
 
+            log::info!(
+                "AgentRegistryStore::load_cached_registry: reading {}",
+                cache_path.display()
+            );
             let bytes = fs
                 .load_bytes(&cache_path)
                 .await
@@ -271,6 +278,10 @@ impl AgentRegistryStore {
             let agents = build_registry_agents(fs, http_client, index, bytes, false).await?;
 
             this.update(cx, |this, cx| {
+                log::info!(
+                    "AgentRegistryStore::load_cached_registry: loaded {} agents",
+                    agents.len()
+                );
                 this.agents = agents;
                 cx.notify();
             })?;
@@ -287,6 +298,7 @@ struct RegistryFetchResult {
 }
 
 async fn fetch_registry_index(http_client: Arc<dyn HttpClient>) -> Result<RegistryFetchResult> {
+    log::info!("AgentRegistryStore::fetch_registry_index requesting {REGISTRY_URL}");
     let mut response = http_client
         .get(REGISTRY_URL, AsyncBody::default(), true)
         .await
@@ -308,6 +320,11 @@ async fn fetch_registry_index(http_client: Arc<dyn HttpClient>) -> Result<Regist
     }
 
     let index: RegistryIndex = serde_json::from_slice(&body).context("parsing ACP registry")?;
+    log::info!(
+        "AgentRegistryStore::fetch_registry_index response received: status={}, agents={}",
+        response.status().as_u16(),
+        index.agents.len()
+    );
     Ok(RegistryFetchResult {
         index,
         raw_body: body,
@@ -323,6 +340,11 @@ async fn build_registry_agents(
 ) -> Result<Vec<RegistryAgent>> {
     let cache_dir = registry_cache_dir();
     fs.create_dir(&cache_dir).await?;
+    log::info!(
+        "AgentRegistryStore::build_registry_agents: update_cache={}, cache_dir={}",
+        update_cache,
+        cache_dir.display()
+    );
 
     let cache_path = cache_dir.join("registry.json");
     if update_cache {
@@ -409,6 +431,10 @@ async fn build_registry_agents(
         agents.push(agent);
     }
 
+    log::info!(
+        "AgentRegistryStore::build_registry_agents: built {} compatible agents",
+        agents.len()
+    );
     Ok(agents)
 }
 

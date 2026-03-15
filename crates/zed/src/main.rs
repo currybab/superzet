@@ -69,6 +69,8 @@ use agent_ui::AgentPanel;
 use collab_ui::channel_view::ChannelView;
 #[cfg(feature = "ai")]
 use gpui::Focusable;
+#[cfg(feature = "acp_tabs")]
+use superzent_ui::NewAcpTab;
 #[cfg(feature = "ai")]
 use zed::edit_prediction_registry;
 
@@ -645,7 +647,7 @@ fn main() {
         zed::init(cx);
         superzent_model::SuperzentStore::init(cx);
         superzent_ui::init(cx);
-        #[cfg(feature = "ai")]
+        #[cfg(feature = "acp_tabs")]
         agent::ThreadStore::init_global(cx);
         project::Project::init(&client, cx);
         debugger_ui::init(cx);
@@ -734,6 +736,17 @@ fn main() {
         zed::remote_debug::init(cx);
         web_search::init(cx);
         snippet_provider::init(cx);
+        #[cfg(feature = "acp_tabs")]
+        {
+            language_model::init(app_state.client.clone(), cx);
+            language_models::init(app_state.user_store.clone(), app_state.client.clone(), cx);
+            web_search_providers::init(app_state.client.clone(), app_state.user_store.clone(), cx);
+            project::AgentRegistryStore::init_global(
+                cx,
+                app_state.fs.clone(),
+                app_state.client.http_client(),
+            );
+        }
         #[cfg(feature = "ai")]
         {
             let copilot_chat_configuration = copilot_chat::CopilotChatConfiguration {
@@ -749,18 +762,19 @@ fn main() {
                 copilot_chat_configuration,
                 cx,
             );
-            language_model::init(app_state.client.clone(), cx);
-            language_models::init(app_state.user_store.clone(), app_state.client.clone(), cx);
-            web_search_providers::init(app_state.client.clone(), app_state.user_store.clone(), cx);
             edit_prediction_registry::init(
                 app_state.client.clone(),
                 app_state.user_store.clone(),
                 cx,
             );
-            project::AgentRegistryStore::init_global(
-                cx,
+        }
+        #[cfg(feature = "acp_tabs")]
+        {
+            agent_ui::init_external_agent_tabs(
                 app_state.fs.clone(),
-                app_state.client.http_client(),
+                app_state.languages.clone(),
+                false,
+                cx,
             );
         }
 
@@ -997,23 +1011,25 @@ fn handle_open_request(request: OpenRequest, app_state: Arc<AppState>, cx: &mut 
                 .detach_and_log_err(cx);
             }
             OpenRequestKind::AgentPanel { initial_prompt } => {
-                #[cfg(feature = "ai")]
+                #[cfg(feature = "acp_tabs")]
                 cx.spawn(async move |cx| {
                     let multi_workspace =
                         workspace::get_any_active_multi_workspace(app_state, cx.clone()).await?;
 
                     multi_workspace.update(cx, |multi_workspace, window, cx| {
-                        multi_workspace.workspace().update(cx, |workspace, cx| {
-                            if let Some(panel) = workspace.focus_panel::<AgentPanel>(window, cx) {
-                                panel.update(cx, |panel, cx| {
-                                    panel.new_external_thread_with_text(initial_prompt, window, cx);
-                                });
-                            }
+                        multi_workspace.workspace().update(cx, |_workspace, cx| {
+                            window.dispatch_action(
+                                Box::new(NewAcpTab {
+                                    agent_name: None,
+                                    prompt: initial_prompt.clone(),
+                                }),
+                                cx,
+                            );
                         });
                     })
                 })
                 .detach_and_log_err(cx);
-                #[cfg(not(feature = "ai"))]
+                #[cfg(not(feature = "acp_tabs"))]
                 {
                     let _ = initial_prompt;
                     log::warn!("Ignoring agent panel open request in lite build");

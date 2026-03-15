@@ -1,4 +1,4 @@
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, anyhow, bail};
 use collections::HashMap;
 use serde::Deserialize;
 use std::{
@@ -7,7 +7,7 @@ use std::{
     sync::{Arc, Mutex, OnceLock},
     thread,
 };
-use superzent_model::{AgentPreset, AgentSession, WorkspaceEntry};
+use superzent_model::{AgentPreset, AgentSession, PresetLaunchMode, WorkspaceEntry};
 use task::{HideStrategy, RevealStrategy, RevealTarget, Shell, SpawnInTerminal, TaskId};
 use tiny_http::{Response, Server};
 use url::Url;
@@ -124,6 +124,10 @@ pub fn prepare_workspace_launch(
     workspace: &WorkspaceEntry,
     preset: &AgentPreset,
 ) -> Result<PreparedWorkspaceLaunch> {
+    if preset.launch_mode != PresetLaunchMode::Terminal {
+        bail!("ACP presets cannot be launched in a terminal");
+    }
+
     let mut environment = preset.env.clone().into_iter().collect::<HashMap<_, _>>();
     inject_terminal_environment(&mut environment)?;
     environment.insert(AGENT_WORKSPACE_ID_ENV_VAR.to_string(), workspace.id.clone());
@@ -674,9 +678,11 @@ mod tests {
         let preset = AgentPreset {
             id: "codex".to_string(),
             label: "Codex".to_string(),
+            launch_mode: PresetLaunchMode::Terminal,
             command: "codex".to_string(),
             args: Vec::new(),
             env: Default::default(),
+            acp_agent_name: Some("codex-acp".to_string()),
             attention_patterns: Vec::new(),
         };
 
@@ -684,5 +690,43 @@ mod tests {
 
         assert_eq!(label, "Codex");
         assert_eq!(full_label, "feature-branch · Codex");
+    }
+
+    #[test]
+    fn prepare_workspace_launch_rejects_acp_presets() {
+        let workspace = WorkspaceEntry {
+            id: "workspace-1".to_string(),
+            project_id: "project-1".to_string(),
+            kind: WorkspaceKind::Worktree,
+            name: "feature-branch".to_string(),
+            display_name: None,
+            branch: "feature-branch".to_string(),
+            location: WorkspaceLocation::Local {
+                worktree_path: PathBuf::from("/tmp/feature-branch"),
+            },
+            agent_preset_id: "codex".to_string(),
+            managed: true,
+            git_status: WorkspaceGitStatus::Available,
+            git_summary: None,
+            attention_status: WorkspaceAttentionStatus::Idle,
+            review_pending: false,
+            last_attention_reason: None,
+            created_at: Default::default(),
+            last_opened_at: Default::default(),
+        };
+        let preset = AgentPreset {
+            id: "codex".to_string(),
+            label: "Codex".to_string(),
+            launch_mode: PresetLaunchMode::Acp,
+            command: "codex".to_string(),
+            args: Vec::new(),
+            env: Default::default(),
+            acp_agent_name: Some("codex-acp".to_string()),
+            attention_patterns: Vec::new(),
+        };
+
+        let error = prepare_workspace_launch(&workspace, &preset)
+            .expect_err("ACP presets should not use the terminal launch path");
+        assert_eq!(error.to_string(), "ACP presets cannot be launched in a terminal");
     }
 }

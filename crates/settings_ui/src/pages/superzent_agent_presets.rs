@@ -2,7 +2,9 @@ use anyhow::{Result, bail};
 use editor::Editor;
 use gpui::{AnyElement, Context, Entity, ScrollHandle, SharedString, Subscription, Window};
 use std::collections::BTreeMap;
-use superzent_model::{AgentPreset, AgentPresetDraft, SuperzentStore};
+use superzent_model::{
+    AgentPreset, AgentPresetDraft, PresetLaunchMode, SuperzentStore, suggested_acp_agent_name,
+};
 use ui::{Button, ButtonStyle, Color, Divider, IconButton, IconName, Label, Tooltip, prelude::*};
 
 use crate::SettingsWindow;
@@ -37,6 +39,43 @@ struct AgentPresetsPage {
     _subscription: Subscription,
 }
 
+struct LaunchModeState {
+    mode: PresetLaunchMode,
+    saved_mode: PresetLaunchMode,
+}
+
+impl LaunchModeState {
+    fn new(mode: PresetLaunchMode) -> Self {
+        Self {
+            mode,
+            saved_mode: mode,
+        }
+    }
+
+    fn set_mode(&mut self, mode: PresetLaunchMode, cx: &mut Context<Self>) {
+        if self.mode != mode {
+            self.mode = mode;
+            cx.notify();
+        }
+    }
+
+    fn reset(&mut self, cx: &mut Context<Self>) {
+        if self.mode != self.saved_mode {
+            self.mode = self.saved_mode;
+            cx.notify();
+        }
+    }
+
+    fn sync(&mut self, saved_mode: PresetLaunchMode, cx: &mut Context<Self>) {
+        let was_dirty = self.mode != self.saved_mode;
+        self.saved_mode = saved_mode;
+        if !was_dirty || self.mode == saved_mode {
+            self.mode = saved_mode;
+        }
+        cx.notify();
+    }
+}
+
 impl AgentPresetsPage {
     fn new(cx: &mut Context<Self>) -> Self {
         let store = SuperzentStore::global(cx);
@@ -68,12 +107,16 @@ impl AgentPresetsPage {
             .map(AgentPresetDraft::from)
             .unwrap_or_else(|| AgentPresetDraft {
                 label: "New Preset".to_string(),
+                launch_mode: PresetLaunchMode::Terminal,
                 command: "codex".to_string(),
                 args: Vec::new(),
                 env: BTreeMap::new(),
+                acp_agent_name: suggested_acp_agent_name("codex"),
                 attention_patterns: Vec::new(),
             });
         draft.label = next_new_preset_label(&presets);
+        draft.launch_mode = PresetLaunchMode::Terminal;
+        draft.acp_agent_name = suggested_acp_agent_name(&draft.command);
         draft.attention_patterns.clear();
 
         match self
@@ -117,28 +160,28 @@ impl AgentPresetsPage {
 
     fn save_preset(
         &mut self,
-        preset_id: &str,
+        preset: &AgentPreset,
         label_editor: &Entity<Editor>,
         command_editor: &Entity<Editor>,
         args_editor: &Entity<Editor>,
         env_editor: &Entity<Editor>,
-        attention_patterns: &[String],
+        acp_agent_editor: &Entity<Editor>,
+        launch_mode: PresetLaunchMode,
         cx: &mut Context<Self>,
     ) {
-        let draft = parse_preset_draft(
+        let draft = build_preset_draft(
+            preset,
             label_editor.read(cx).text(cx),
             command_editor.read(cx).text(cx),
             args_editor.read(cx).text(cx),
             env_editor.read(cx).text(cx),
-        )
-        .map(|mut draft| {
-            draft.attention_patterns = attention_patterns.to_vec();
-            draft
-        });
+            acp_agent_editor.read(cx).text(cx),
+            launch_mode,
+        );
 
         match draft.and_then(|draft| {
             self.store
-                .update(cx, |store, cx| store.update_preset(preset_id, draft, cx))
+                .update(cx, |store, cx| store.update_preset(&preset.id, draft, cx))
         }) {
             Ok(()) => self.clear_error(cx),
             Err(error) => self.set_error(format!("Failed to save preset: {error}"), cx),
@@ -164,6 +207,14 @@ impl AgentPresetsPage {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let launch_mode_state = window.use_keyed_state(
+            format!("superzent-preset-launch-mode-{}", preset.id),
+            cx,
+            |_, _| LaunchModeState::new(preset.launch_mode),
+        );
+        sync_launch_mode_state(&launch_mode_state, preset.launch_mode, cx);
+        let current_launch_mode = launch_mode_state.read(cx).mode;
+
         let label_editor = preset_editor(
             format!("superzent-preset-label-{}", preset.id),
             &preset.label,
@@ -193,6 +244,14 @@ impl AgentPresetsPage {
             &render_env_lines(&preset.env),
             true,
             "KEY=VALUE per line",
+            window,
+            cx,
+        );
+        let acp_agent_editor = preset_editor(
+            format!("superzent-preset-acp-agent-{}", preset.id),
+            &preset.resolved_acp_agent_name().unwrap_or_default(),
+            false,
+            "codex-acp",
             window,
             cx,
         );
@@ -272,17 +331,36 @@ impl AgentPresetsPage {
                     ),
             )
             .child(render_field("Label", None, label_editor.clone()))
-            .child(render_field("Command", None, command_editor.clone()))
-            .child(render_field(
-                "Arguments",
-                Some("One argument per line"),
-                args_editor.clone(),
+            .child(render_launch_mode_field(
+                preset,
+                current_launch_mode,
+                &launch_mode_state,
+                cx,
             ))
-            .child(render_field(
-                "Environment",
-                Some("KEY=VALUE per line"),
-                env_editor.clone(),
-            ))
+            .when(current_launch_mode == PresetLaunchMode::Terminal, |this| {
+                this.child(render_field(
+                    "Command",
+                    Some("Executable to launch in a terminal."),
+                    command_editor.clone(),
+                ))
+                .child(render_field(
+                    "Arguments",
+                    Some("One argument per line"),
+                    args_editor.clone(),
+                ))
+                .child(render_field(
+                    "Environment",
+                    Some("KEY=VALUE per line"),
+                    env_editor.clone(),
+                ))
+            })
+            .when(current_launch_mode == PresetLaunchMode::Acp, |this| {
+                this.child(render_field(
+                    "ACP Agent",
+                    Some("Configured ACP agent server name, for example codex-acp or claude-acp. Built-in ACP agents are installed and managed through the ACP Registry."),
+                    acp_agent_editor.clone(),
+                ))
+            })
             .child(
                 h_flex()
                     .justify_end()
@@ -295,10 +373,14 @@ impl AgentPresetsPage {
                                 let reset_command_editor = command_editor.clone();
                                 let reset_args_editor = args_editor.clone();
                                 let reset_env_editor = env_editor.clone();
+                                let reset_acp_agent_editor = acp_agent_editor.clone();
+                                let reset_launch_mode_state = launch_mode_state.clone();
                                 let label = preset.label.clone();
                                 let command = preset.command.clone();
                                 let args = preset.args.join("\n");
                                 let env = render_env_lines(&preset.env);
+                                let acp_agent_name =
+                                    preset.resolved_acp_agent_name().unwrap_or_default();
                                 move |this, _, window, cx| {
                                     Self::reset_editor_text(
                                         &reset_label_editor,
@@ -324,6 +406,15 @@ impl AgentPresetsPage {
                                         window,
                                         cx,
                                     );
+                                    Self::reset_editor_text(
+                                        &reset_acp_agent_editor,
+                                        acp_agent_name.clone(),
+                                        window,
+                                        cx,
+                                    );
+                                    reset_launch_mode_state.update(cx, |state, cx| {
+                                        state.reset(cx);
+                                    });
                                     this.clear_error(cx);
                                 }
                             })),
@@ -332,16 +423,17 @@ impl AgentPresetsPage {
                         Button::new(format!("superzent-preset-save-{}", preset.id), "Save")
                             .style(ButtonStyle::Filled)
                             .on_click(cx.listener({
-                                let preset_id = preset.id.clone();
-                                let attention_patterns = preset.attention_patterns.clone();
+                                let preset = preset.clone();
+                                let launch_mode_state = launch_mode_state.clone();
                                 move |this, _, _, cx| {
                                     this.save_preset(
-                                        &preset_id,
+                                        &preset,
                                         &label_editor,
                                         &command_editor,
                                         &args_editor,
                                         &env_editor,
-                                        &attention_patterns,
+                                        &acp_agent_editor,
+                                        launch_mode_state.read(cx).mode,
                                         cx,
                                     );
                                 }
@@ -368,7 +460,7 @@ impl Render for AgentPresetsPage {
                     .child(Label::new("Agent Presets").size(LabelSize::Large))
                     .child(
                         Label::new(
-                            "Configure the preset buttons shown below terminal tabs and the default agent launch settings for managed workspaces.",
+                            "Configure the preset buttons shown below terminal tabs. Terminal presets run your local CLI directly, while ACP Chat presets connect to ACP agent servers such as codex-acp or claude-acp.",
                         )
                         .size(LabelSize::Small)
                         .color(Color::Muted),
@@ -429,6 +521,66 @@ fn render_field(
         .into_any_element()
 }
 
+fn render_launch_mode_field(
+    preset: &AgentPreset,
+    current_launch_mode: PresetLaunchMode,
+    launch_mode_state: &Entity<LaunchModeState>,
+    cx: &mut Context<AgentPresetsPage>,
+) -> AnyElement {
+    v_flex()
+        .min_w_0()
+        .w_full()
+        .gap_1()
+        .child(Label::new("Launch Mode").size(LabelSize::Small))
+        .child(
+            Label::new("Choose whether this preset opens a terminal command or an ACP chat tab.")
+                .size(LabelSize::XSmall)
+                .color(Color::Muted),
+        )
+        .child(
+            h_flex()
+                .gap_2()
+                .child(
+                    Button::new(
+                        format!("superzent-preset-mode-terminal-{}", preset.id),
+                        "Terminal",
+                    )
+                    .style(if current_launch_mode == PresetLaunchMode::Terminal {
+                        ButtonStyle::Filled
+                    } else {
+                        ButtonStyle::Subtle
+                    })
+                    .on_click(cx.listener({
+                        let launch_mode_state = launch_mode_state.clone();
+                        move |this, _, _, cx| {
+                            launch_mode_state.update(cx, |state, cx| {
+                                state.set_mode(PresetLaunchMode::Terminal, cx);
+                            });
+                            this.clear_error(cx);
+                        }
+                    })),
+                )
+                .child(
+                    Button::new(format!("superzent-preset-mode-acp-{}", preset.id), "ACP Chat")
+                        .style(if current_launch_mode == PresetLaunchMode::Acp {
+                            ButtonStyle::Filled
+                        } else {
+                            ButtonStyle::Subtle
+                        })
+                        .on_click(cx.listener({
+                            let launch_mode_state = launch_mode_state.clone();
+                            move |this, _, _, cx| {
+                                launch_mode_state.update(cx, |state, cx| {
+                                    state.set_mode(PresetLaunchMode::Acp, cx);
+                                });
+                                this.clear_error(cx);
+                            }
+                        })),
+                ),
+        )
+        .into_any_element()
+}
+
 fn preset_editor(
     id: impl Into<gpui::ElementId>,
     expected_text: &str,
@@ -470,6 +622,23 @@ fn sync_editor_text(
     }
 }
 
+fn sync_launch_mode_state(
+    launch_mode_state: &Entity<LaunchModeState>,
+    expected_mode: PresetLaunchMode,
+    cx: &mut Context<AgentPresetsPage>,
+) {
+    let should_sync = {
+        let state = launch_mode_state.read(cx);
+        state.saved_mode != expected_mode
+    };
+
+    if should_sync {
+        launch_mode_state.update(cx, |state, cx| {
+            state.sync(expected_mode, cx);
+        });
+    }
+}
+
 fn next_new_preset_label(existing_presets: &[AgentPreset]) -> String {
     let mut index = 1usize;
     loop {
@@ -493,40 +662,51 @@ fn render_env_lines(environment: &BTreeMap<String, String>) -> String {
         .join("\n")
 }
 
-fn parse_preset_draft(
+fn build_preset_draft(
+    preset: &AgentPreset,
     label: String,
     command: String,
     arguments: String,
     environment: String,
+    acp_agent_name: String,
+    launch_mode: PresetLaunchMode,
 ) -> Result<AgentPresetDraft> {
-    let args = arguments
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .map(str::to_string)
-        .collect::<Vec<_>>();
+    let mut draft = AgentPresetDraft::from(preset);
+    draft.label = label;
+    draft.launch_mode = launch_mode;
 
-    let mut environment_map = BTreeMap::new();
-    for line in environment
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-    {
-        let Some((key, value)) = line.split_once('=') else {
-            bail!("Environment lines must use KEY=VALUE.");
-        };
-        let key = key.trim();
-        if key.is_empty() {
-            bail!("Environment keys cannot be empty.");
+    match launch_mode {
+        PresetLaunchMode::Terminal => {
+            draft.command = command;
+            draft.args = arguments
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+                .map(str::to_string)
+                .collect::<Vec<_>>();
+
+            let mut environment_map = BTreeMap::new();
+            for line in environment
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+            {
+                let Some((key, value)) = line.split_once('=') else {
+                    bail!("Environment lines must use KEY=VALUE.");
+                };
+                let key = key.trim();
+                if key.is_empty() {
+                    bail!("Environment keys cannot be empty.");
+                }
+                environment_map.insert(key.to_string(), value.trim().to_string());
+            }
+            draft.env = environment_map;
         }
-        environment_map.insert(key.to_string(), value.trim().to_string());
+        PresetLaunchMode::Acp => {
+            let acp_agent_name = acp_agent_name.trim().to_string();
+            draft.acp_agent_name = (!acp_agent_name.is_empty()).then_some(acp_agent_name);
+        }
     }
 
-    Ok(AgentPresetDraft {
-        label,
-        command,
-        args,
-        env: environment_map,
-        attention_patterns: Vec::new(),
-    })
+    Ok(draft)
 }

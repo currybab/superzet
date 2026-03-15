@@ -16840,10 +16840,12 @@ dependencies = [
 name = "superzent_ui"
 version = "0.1.0"
 dependencies = [
+ "agent_ui",
  "anyhow",
  "chrono",
  "cocoa 0.26.0",
  "editor",
+ "fs",
  "git",
  "git_ui",
  "gpui",
@@ -16854,6 +16856,8 @@ dependencies = [
  "project_panel",
  "recent_projects",
  "remote",
+ "schemars",
+ "serde",
  "settings",
  "smol",
  "superzent_agent",

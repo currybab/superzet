@@ -39,6 +39,14 @@ pub enum WorkspaceAttentionStatus {
     Review,
 }
 
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PresetLaunchMode {
+    #[default]
+    Terminal,
+    Acp,
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct GitChangeSummary {
     pub changed_files: usize,
@@ -58,11 +66,15 @@ pub enum WorkspaceGitStatus {
 pub struct AgentPreset {
     pub id: String,
     pub label: String,
+    #[serde(default)]
+    pub launch_mode: PresetLaunchMode,
     pub command: String,
     #[serde(default)]
     pub args: Vec<String>,
     #[serde(default)]
     pub env: BTreeMap<String, String>,
+    #[serde(default)]
+    pub acp_agent_name: Option<String>,
     #[serde(default)]
     pub attention_patterns: Vec<String>,
 }
@@ -70,9 +82,11 @@ pub struct AgentPreset {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct AgentPresetDraft {
     pub label: String,
+    pub launch_mode: PresetLaunchMode,
     pub command: String,
     pub args: Vec<String>,
     pub env: BTreeMap<String, String>,
+    pub acp_agent_name: Option<String>,
     pub attention_patterns: Vec<String>,
 }
 
@@ -80,11 +94,29 @@ impl From<&AgentPreset> for AgentPresetDraft {
     fn from(value: &AgentPreset) -> Self {
         Self {
             label: value.label.clone(),
+            launch_mode: value.launch_mode,
             command: value.command.clone(),
             args: value.args.clone(),
             env: value.env.clone(),
+            acp_agent_name: value.acp_agent_name.clone(),
             attention_patterns: value.attention_patterns.clone(),
         }
+    }
+}
+
+impl AgentPreset {
+    pub fn resolved_acp_agent_name(&self) -> Option<String> {
+        normalize_optional_text(self.acp_agent_name.clone())
+            .or_else(|| suggested_acp_agent_name(&self.command))
+    }
+}
+
+pub fn suggested_acp_agent_name(command: &str) -> Option<String> {
+    match command.trim() {
+        "codex" | "codex-acp" => Some("codex-acp".to_string()),
+        "claude" | "claude-code" | "claude-acp" => Some("claude-acp".to_string()),
+        "gemini" => Some("gemini".to_string()),
+        _ => None,
     }
 }
 
@@ -1327,6 +1359,9 @@ impl SuperzentStore {
                 preset.label = "Preset".to_string();
             }
 
+            preset.acp_agent_name = normalize_optional_text(preset.acp_agent_name.clone())
+                .or_else(|| suggested_acp_agent_name(&preset.command));
+
             let desired_id = if preset.id.trim().is_empty() {
                 preset_slug(&preset.label)
             } else {
@@ -1729,25 +1764,31 @@ fn default_presets() -> Vec<AgentPreset> {
         AgentPreset {
             id: "codex".into(),
             label: "Codex".into(),
+            launch_mode: PresetLaunchMode::Terminal,
             command: "codex".into(),
             args: Vec::new(),
             env: BTreeMap::new(),
+            acp_agent_name: Some("codex-acp".into()),
             attention_patterns: vec!["needs attention".into(), "blocked".into()],
         },
         AgentPreset {
             id: "claude-code".into(),
             label: "Claude Code".into(),
+            launch_mode: PresetLaunchMode::Terminal,
             command: "claude".into(),
             args: Vec::new(),
             env: BTreeMap::new(),
+            acp_agent_name: Some("claude-acp".into()),
             attention_patterns: vec!["waiting for input".into()],
         },
         AgentPreset {
             id: "gemini".into(),
             label: "Gemini CLI".into(),
+            launch_mode: PresetLaunchMode::Terminal,
             command: "gemini".into(),
             args: Vec::new(),
             env: BTreeMap::new(),
+            acp_agent_name: Some("gemini".into()),
             attention_patterns: vec!["press enter".into()],
         },
     ]
@@ -1757,12 +1798,20 @@ impl AgentPresetDraft {
     fn into_preset(self, id: String) -> Result<AgentPreset> {
         let label = self.label.trim().to_string();
         let command = self.command.trim().to_string();
+        let acp_agent_name =
+            normalize_optional_text(self.acp_agent_name).or_else(|| suggested_acp_agent_name(&command));
 
         if label.is_empty() {
             bail!("preset label is required");
         }
-        if command.is_empty() {
-            bail!("preset command is required");
+        match self.launch_mode {
+            PresetLaunchMode::Terminal if command.is_empty() => {
+                bail!("preset command is required");
+            }
+            PresetLaunchMode::Acp if acp_agent_name.is_none() => {
+                bail!("ACP agent name is required");
+            }
+            _ => {}
         }
 
         let args = self
@@ -1793,9 +1842,11 @@ impl AgentPresetDraft {
         Ok(AgentPreset {
             id,
             label,
+            launch_mode: self.launch_mode,
             command,
             args,
             env,
+            acp_agent_name,
             attention_patterns,
         })
     }
@@ -1855,6 +1906,12 @@ fn unique_slug(base_id: &str, used_ids: &mut BTreeSet<String>) -> String {
 
     used_ids.insert(next_id.clone());
     next_id
+}
+
+fn normalize_optional_text(value: Option<String>) -> Option<String> {
+    value
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
 }
 
 fn format_remote_path(connection: &StoredSshConnection, remote_path: &str) -> String {
@@ -2056,6 +2113,39 @@ mod tests {
 
         let workspace = store.startup_workspace().expect("workspace should resolve");
         assert_eq!(workspace.id, "worktree");
+    }
+
+    #[test]
+    fn built_in_presets_resolve_default_acp_agent_names() {
+        let preset = AgentPreset {
+            id: "codex".to_string(),
+            label: "Codex".to_string(),
+            launch_mode: PresetLaunchMode::Acp,
+            command: "codex".to_string(),
+            args: Vec::new(),
+            env: BTreeMap::new(),
+            acp_agent_name: None,
+            attention_patterns: Vec::new(),
+        };
+
+        assert_eq!(preset.resolved_acp_agent_name().as_deref(), Some("codex-acp"));
+    }
+
+    #[test]
+    fn acp_presets_require_an_agent_name_for_custom_commands() {
+        let error = AgentPresetDraft {
+            label: "Custom".to_string(),
+            launch_mode: PresetLaunchMode::Acp,
+            command: "my-agent".to_string(),
+            args: Vec::new(),
+            env: BTreeMap::new(),
+            acp_agent_name: None,
+            attention_patterns: Vec::new(),
+        }
+        .into_preset("custom".to_string())
+        .expect_err("custom ACP presets should require an explicit agent name");
+
+        assert_eq!(error.to_string(), "ACP agent name is required");
     }
 
     #[test]
