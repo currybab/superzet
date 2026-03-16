@@ -265,8 +265,26 @@ struct PanelEntry {
     _subscriptions: [Subscription; 3],
 }
 
+#[derive(Copy, Clone)]
+enum PanelButtonFilter {
+    All,
+    Only(&'static [&'static str]),
+    Except(&'static [&'static str]),
+}
+
+impl PanelButtonFilter {
+    fn matches(self, panel_name: &str) -> bool {
+        match self {
+            Self::All => true,
+            Self::Only(panel_names) => panel_names.contains(&panel_name),
+            Self::Except(panel_names) => !panel_names.contains(&panel_name),
+        }
+    }
+}
+
 pub struct PanelButtons {
     dock: Entity<Dock>,
+    filter: PanelButtonFilter,
     _settings_subscription: Subscription,
 }
 
@@ -888,10 +906,35 @@ impl Render for Dock {
 
 impl PanelButtons {
     pub fn new(dock: Entity<Dock>, cx: &mut Context<Self>) -> Self {
+        Self::new_with_filter(dock, PanelButtonFilter::All, cx)
+    }
+
+    pub fn new_only(
+        dock: Entity<Dock>,
+        panel_names: &'static [&'static str],
+        cx: &mut Context<Self>,
+    ) -> Self {
+        Self::new_with_filter(dock, PanelButtonFilter::Only(panel_names), cx)
+    }
+
+    pub fn new_except(
+        dock: Entity<Dock>,
+        panel_names: &'static [&'static str],
+        cx: &mut Context<Self>,
+    ) -> Self {
+        Self::new_with_filter(dock, PanelButtonFilter::Except(panel_names), cx)
+    }
+
+    fn new_with_filter(
+        dock: Entity<Dock>,
+        filter: PanelButtonFilter,
+        cx: &mut Context<Self>,
+    ) -> Self {
         cx.observe(&dock, |_, _, cx| cx.notify()).detach();
         let settings_subscription = cx.observe_global::<SettingsStore>(|_, cx| cx.notify());
         Self {
             dock,
+            filter,
             _settings_subscription: settings_subscription,
         }
     }
@@ -903,6 +946,7 @@ impl Render for PanelButtons {
         let active_index = dock.active_panel_index;
         let is_open = dock.is_open;
         let dock_position = dock.position;
+        let filter = self.filter;
 
         let (menu_anchor, menu_attach) = match dock.position {
             DockPosition::Left => (Corner::BottomLeft, Corner::TopLeft),
@@ -914,6 +958,10 @@ impl Render for PanelButtons {
             .iter()
             .enumerate()
             .filter_map(|(i, entry)| {
+                if !filter.matches(entry.panel.persistent_name()) {
+                    return None;
+                }
+
                 let icon = entry.panel.icon(window, cx)?;
                 let icon_tooltip = entry
                     .panel
