@@ -434,9 +434,6 @@ impl WorkspaceAttentionController {
         let options = AgentNotification::window_options(screen, cx);
 
         let screen_window = match cx.open_window(options, {
-            let title = title.clone();
-            let caption = caption.clone();
-            let workspace_name = workspace_name.clone();
             move |_window, cx| {
                 cx.new(|_cx| {
                     AgentNotification::new(
