@@ -2572,14 +2572,12 @@ impl Pane {
         let pane = cx.entity();
 
         window.defer(cx, move |window, cx| {
-            let Ok(status_bar) =
-                workspace.read_with(cx, |workspace, _| workspace.status_bar.clone())
-            else {
+            let Some(workspace) = workspace.upgrade() else {
                 return;
             };
 
-            status_bar.update(cx, move |status_bar, cx| {
-                status_bar.set_active_pane(&pane, window, cx);
+            workspace.update(cx, move |workspace, cx| {
+                workspace.set_status_item_active_pane(&pane, window, cx);
             });
         });
     }
