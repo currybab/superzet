@@ -69,7 +69,6 @@ pub use crate::agent_panel::{
     AgentPanel, AgentPanelEvent, ConcreteAssistantPanelDelegate, WorktreeCreationStatus,
 };
 use crate::agent_registry_ui::AgentRegistryPage;
-pub(crate) use crate::external_tabs::open_session_in_active_external_acp_tab;
 pub use crate::external_tabs::{
     active_external_acp_agent_name, active_external_acp_agent_name_in_pane, focus_external_acp_tab,
     open_external_acp_history, open_external_acp_tab, pane_has_external_acp_item,

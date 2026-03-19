@@ -241,26 +241,6 @@ pub fn focus_external_acp_tab(
     false
 }
 
-pub(crate) fn open_session_in_active_external_acp_tab(
-    workspace: &mut Workspace,
-    session: AgentSessionInfo,
-    window: &mut Window,
-    cx: &mut Context<Workspace>,
-) -> bool {
-    let Some(active_tab) = workspace
-        .active_pane()
-        .read(cx)
-        .active_item_as::<ExternalAcpTabItem>()
-    else {
-        return false;
-    };
-
-    active_tab.update(cx, |tab, cx| {
-        tab.open_history_session(session.clone(), window, cx);
-    });
-    true
-}
-
 fn show_external_acp_history_in_active_tab(
     workspace: &mut Workspace,
     agent_name: SharedString,

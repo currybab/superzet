@@ -1,22 +1,19 @@
-use crate::ConnectionView;
-use crate::{
-    AgentPanel, RemoveHistory, RemoveSelectedThread, open_session_in_active_external_acp_tab,
-};
+use crate::{RemoveHistory, RemoveSelectedThread};
 use acp_thread::{AgentSessionInfo, AgentSessionList, AgentSessionListRequest, SessionListUpdate};
 use agent_client_protocol as acp;
 use chrono::{Datelike as _, Local, NaiveDate, TimeDelta, Utc};
 use editor::{Editor, EditorEvent};
 use fuzzy::StringMatchCandidate;
 use gpui::{
-    App, Context, Entity, EventEmitter, FocusHandle, Focusable, ScrollStrategy, Task,
-    UniformListScrollHandle, WeakEntity, Window, uniform_list,
+    Context, Entity, EventEmitter, FocusHandle, Focusable, ScrollStrategy, Task,
+    UniformListScrollHandle, Window, uniform_list,
 };
 use std::{fmt::Display, ops::Range, rc::Rc};
 use text::Bias;
 use time::{OffsetDateTime, UtcOffset};
 use ui::{
-    ElementId, HighlightedLabel, IconButtonShape, ListItem, ListItemSpacing, Tab, Tooltip,
-    WithScrollbar, prelude::*,
+    HighlightedLabel, IconButtonShape, ListItem, ListItemSpacing, Tab, Tooltip, WithScrollbar,
+    prelude::*,
 };
 
 const DEFAULT_TITLE: &SharedString = &SharedString::new_static("New Thread");
@@ -927,124 +924,6 @@ impl Render for ThreadHistory {
                                 )
                         }),
                 )
-            })
-    }
-}
-
-#[derive(IntoElement)]
-pub struct HistoryEntryElement {
-    entry: AgentSessionInfo,
-    thread_view: WeakEntity<ConnectionView>,
-    selected: bool,
-    hovered: bool,
-    supports_delete: bool,
-    on_hover: Box<dyn Fn(&bool, &mut Window, &mut App) + 'static>,
-}
-
-impl HistoryEntryElement {
-    pub fn new(entry: AgentSessionInfo, thread_view: WeakEntity<ConnectionView>) -> Self {
-        Self {
-            entry,
-            thread_view,
-            selected: false,
-            hovered: false,
-            supports_delete: false,
-            on_hover: Box::new(|_, _, _| {}),
-        }
-    }
-
-    pub fn supports_delete(mut self, supports_delete: bool) -> Self {
-        self.supports_delete = supports_delete;
-        self
-    }
-
-    pub fn hovered(mut self, hovered: bool) -> Self {
-        self.hovered = hovered;
-        self
-    }
-
-    pub fn on_hover(mut self, on_hover: impl Fn(&bool, &mut Window, &mut App) + 'static) -> Self {
-        self.on_hover = Box::new(on_hover);
-        self
-    }
-}
-
-impl RenderOnce for HistoryEntryElement {
-    fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
-        let id = ElementId::Name(self.entry.session_id.0.clone().into());
-        let title = thread_title(&self.entry).clone();
-        let formatted_time = self
-            .entry
-            .updated_at
-            .map(|timestamp| {
-                let now = chrono::Utc::now();
-                let duration = now.signed_duration_since(timestamp);
-
-                if duration.num_days() > 0 {
-                    format!("{}d", duration.num_days())
-                } else if duration.num_hours() > 0 {
-                    format!("{}h ago", duration.num_hours())
-                } else if duration.num_minutes() > 0 {
-                    format!("{}m ago", duration.num_minutes())
-                } else {
-                    "Just now".to_string()
-                }
-            })
-            .unwrap_or_else(|| "Unknown".to_string());
-
-        ListItem::new(id)
-            .rounded()
-            .toggle_state(self.selected)
-            .spacing(ListItemSpacing::Sparse)
-            .start_slot(
-                h_flex()
-                    .w_full()
-                    .gap_2()
-                    .justify_between()
-                    .child(Label::new(title).size(LabelSize::Small).truncate())
-                    .child(
-                        Label::new(formatted_time)
-                            .color(Color::Muted)
-                            .size(LabelSize::XSmall),
-                    ),
-            )
-            .on_hover(self.on_hover)
-            .end_slot::<IconButton>(if (self.hovered || self.selected) && self.supports_delete {
-                Some(
-                    IconButton::new("delete", IconName::Trash)
-                        .shape(IconButtonShape::Square)
-                        .icon_size(IconSize::XSmall)
-                        .icon_color(Color::Muted)
-                        .tooltip(move |_window, cx| {
-                            Tooltip::for_action("Delete", &RemoveSelectedThread, cx)
-                        })
-                        .on_click({
-                            let thread_view = self.thread_view.clone();
-                            let entry = self.entry.clone();
-
-                            move |_event, _window, cx| {
-                                if let Some(thread_view) = thread_view.upgrade() {
-                                    thread_view.update(cx, |thread_view, cx| {
-                                        thread_view.delete_history_entry(&entry.session_id, cx);
-                                    });
-                                }
-                            }
-                        }),
-                )
-            } else {
-                None
-            })
-            .on_click({
-                let thread_view = self.thread_view.clone();
-                let entry = self.entry;
-
-                move |_event, window, cx| {
-                    if let Some(thread_view) = thread_view.upgrade() {
-                        thread_view.update(cx, |thread_view, cx| {
-                            thread_view.navigate_to_session(entry.session_id.clone(), window, cx);
-                        });
-                    }
-                }
             })
     }
 }
