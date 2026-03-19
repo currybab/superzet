@@ -1,7 +1,7 @@
 use acp_thread::ThreadStatus;
 use agent::ThreadStore;
 use agent_client_protocol as acp;
-use agent_ui::{AgentPanel, AgentPanelEvent, NewThread};
+use agent_ui::{Agent, AgentPanel, AgentPanelEvent, NewThread};
 use chrono::Utc;
 use editor::{Editor, EditorElement, EditorStyle};
 use feature_flags::{AgentV2FeatureFlag, FeatureFlagViewExt as _};
@@ -57,9 +57,10 @@ impl From<&ActiveThreadInfo> for acp_thread::AgentSessionInfo {
     fn from(info: &ActiveThreadInfo) -> Self {
         Self {
             session_id: info.session_id.clone(),
-            cwd: None,
+            work_dirs: None,
             title: Some(info.title.clone()),
             updated_at: Some(Utc::now()),
+            created_at: Some(Utc::now()),
             meta: None,
         }
     }
@@ -395,7 +396,7 @@ impl Sidebar {
             window,
             |this, agent_panel, event: &AgentPanelEvent, _window, cx| match event {
                 AgentPanelEvent::ActiveViewChanged => {
-                    if let Some(thread) = agent_panel.read(cx).active_connection_view()
+                    if let Some(thread) = agent_panel.read(cx).active_conversation_view()
                         && let Some(session_id) = thread.read(cx).parent_id(cx)
                     {
                         this.focused_thread = Some(session_id);
@@ -405,7 +406,7 @@ impl Sidebar {
                 AgentPanelEvent::ThreadFocused => {
                     let new_focused = agent_panel
                         .read(cx)
-                        .active_connection_view()
+                        .active_conversation_view()
                         .and_then(|thread| thread.read(cx).parent_id(cx));
                     if new_focused != this.focused_thread {
                         this.focused_thread = new_focused;
@@ -505,9 +506,13 @@ impl Sidebar {
 
             if should_load_threads {
                 if let Some(ref thread_store) = thread_store {
-                    for meta in thread_store.read(cx).threads_for_paths(&path_list) {
+                    for meta in thread_store
+                        .read(cx)
+                        .entries()
+                        .filter(|meta| meta.folder_paths == path_list)
+                    {
                         threads.push(ListEntry::Thread {
-                            session_info: meta.into(),
+                            session_info: (&meta).into(),
                             icon: IconName::ZedAgent,
                             icon_from_external_svg: None,
                             status: AgentThreadStatus::default(),
@@ -1086,7 +1091,15 @@ impl Sidebar {
 
         if let Some(agent_panel) = workspace.read(cx).panel::<AgentPanel>(cx) {
             agent_panel.update(cx, |panel, cx| {
-                panel.load_agent_thread(session_info, window, cx);
+                panel.load_agent_thread(
+                    Agent::NativeAgent,
+                    session_info.session_id.clone(),
+                    session_info.work_dirs.clone(),
+                    session_info.title.clone(),
+                    true,
+                    window,
+                    cx,
+                );
             });
         }
     }
@@ -1292,10 +1305,11 @@ impl Sidebar {
                 )
                 .full_width()
                 .style(ButtonStyle::Outlined)
-                .icon(IconName::Plus)
-                .icon_color(Color::Muted)
-                .icon_size(IconSize::Small)
-                .icon_position(IconPosition::Start)
+                .start_icon(
+                    Icon::new(IconName::Plus)
+                        .color(Color::Muted)
+                        .size(IconSize::Small),
+                )
                 .toggle_state(is_selected)
                 .on_click(cx.listener(move |this, _, window, cx| {
                     this.selection = None;
@@ -1318,6 +1332,12 @@ impl WorkspaceSidebar for Sidebar {
 
     fn has_notifications(&self, _cx: &App) -> bool {
         !self.contents.notified_threads.is_empty()
+    }
+
+    fn toggle_recent_projects_popover(&self, _window: &mut Window, _cx: &mut App) {}
+
+    fn is_recent_projects_popover_deployed(&self) -> bool {
+        false
     }
 }
 
@@ -1383,7 +1403,7 @@ impl Render for Sidebar {
                             .child({
                                 let focus_handle_toggle = self.focus_handle.clone();
                                 let focus_handle_focus = self.focus_handle.clone();
-                                IconButton::new("close-sidebar", IconName::WorkspaceNavOpen)
+                                IconButton::new("close-sidebar", IconName::ThreadsSidebarLeftOpen)
                                     .icon_size(IconSize::Small)
                                     .tooltip(Tooltip::element(move |_, cx| {
                                         v_flex()
@@ -1612,7 +1632,7 @@ mod tests {
     ) {
         multi_workspace.update_in(cx, |mw, window, cx| {
             cx.notify();
-            if !mw.is_sidebar_open() {
+            if !mw.sidebar_open() {
                 mw.toggle_sidebar(window, cx);
             }
             mw.focus_sidebar(window, cx);
@@ -1793,7 +1813,7 @@ mod tests {
 
         // Add a second workspace
         multi_workspace.update_in(cx, |mw, window, cx| {
-            mw.create_workspace(window, cx);
+            mw.create_test_workspace(window, cx).detach();
         });
         cx.run_until_parked();
 
@@ -1915,9 +1935,10 @@ mod tests {
                 ListEntry::Thread {
                     session_info: acp_thread::AgentSessionInfo {
                         session_id: acp::SessionId::new(Arc::from("t-1")),
-                        cwd: None,
+                        work_dirs: None,
                         title: Some("Completed thread".into()),
                         updated_at: Some(Utc::now()),
+                        created_at: Some(Utc::now()),
                         meta: None,
                     },
                     icon: IconName::ZedAgent,
@@ -1933,9 +1954,10 @@ mod tests {
                 ListEntry::Thread {
                     session_info: acp_thread::AgentSessionInfo {
                         session_id: acp::SessionId::new(Arc::from("t-2")),
-                        cwd: None,
+                        work_dirs: None,
                         title: Some("Running thread".into()),
                         updated_at: Some(Utc::now()),
+                        created_at: Some(Utc::now()),
                         meta: None,
                     },
                     icon: IconName::ZedAgent,
@@ -1951,9 +1973,10 @@ mod tests {
                 ListEntry::Thread {
                     session_info: acp_thread::AgentSessionInfo {
                         session_id: acp::SessionId::new(Arc::from("t-3")),
-                        cwd: None,
+                        work_dirs: None,
                         title: Some("Error thread".into()),
                         updated_at: Some(Utc::now()),
+                        created_at: Some(Utc::now()),
                         meta: None,
                     },
                     icon: IconName::ZedAgent,
@@ -1969,9 +1992,10 @@ mod tests {
                 ListEntry::Thread {
                     session_info: acp_thread::AgentSessionInfo {
                         session_id: acp::SessionId::new(Arc::from("t-4")),
-                        cwd: None,
+                        work_dirs: None,
                         title: Some("Waiting thread".into()),
                         updated_at: Some(Utc::now()),
+                        created_at: Some(Utc::now()),
                         meta: None,
                     },
                     icon: IconName::ZedAgent,
@@ -1987,9 +2011,10 @@ mod tests {
                 ListEntry::Thread {
                     session_info: acp_thread::AgentSessionInfo {
                         session_id: acp::SessionId::new(Arc::from("t-5")),
-                        cwd: None,
+                        work_dirs: None,
                         title: Some("Notified thread".into()),
                         updated_at: Some(Utc::now()),
+                        created_at: Some(Utc::now()),
                         meta: None,
                     },
                     icon: IconName::ZedAgent,
@@ -2164,7 +2189,7 @@ mod tests {
         let sidebar = setup_sidebar(&multi_workspace, cx);
 
         multi_workspace.update_in(cx, |mw, window, cx| {
-            mw.create_workspace(window, cx);
+            mw.create_test_workspace(window, cx).detach();
         });
         cx.run_until_parked();
 
@@ -2737,7 +2762,7 @@ mod tests {
 
         // Add a second workspace.
         multi_workspace.update_in(cx, |mw, window, cx| {
-            mw.create_workspace(window, cx);
+            mw.create_test_workspace(window, cx).detach();
         });
         cx.run_until_parked();
 
@@ -2832,7 +2857,7 @@ mod tests {
 
         // Add a second workspace.
         multi_workspace.update_in(cx, |mw, window, cx| {
-            mw.create_workspace(window, cx);
+            mw.create_test_workspace(window, cx).detach();
         });
         cx.run_until_parked();
 
@@ -3087,7 +3112,7 @@ mod tests {
         let sidebar = setup_sidebar(&multi_workspace, cx);
 
         multi_workspace.update_in(cx, |mw, window, cx| {
-            mw.create_workspace(window, cx);
+            mw.create_test_workspace(window, cx).detach();
         });
         cx.run_until_parked();
 
@@ -3321,9 +3346,10 @@ mod tests {
             sidebar.activate_thread(
                 acp_thread::AgentSessionInfo {
                     session_id: session_id_a.clone(),
-                    cwd: None,
+                    work_dirs: None,
                     title: Some("Test".into()),
                     updated_at: None,
+                    created_at: Some(Utc::now()),
                     meta: None,
                 },
                 &workspace_a,
@@ -3376,9 +3402,10 @@ mod tests {
             sidebar.activate_thread(
                 acp_thread::AgentSessionInfo {
                     session_id: session_id_b.clone(),
-                    cwd: None,
+                    work_dirs: None,
                     title: Some("Thread B".into()),
                     updated_at: None,
+                    created_at: Some(Utc::now()),
                     meta: None,
                 },
                 &workspace_b,
@@ -3404,7 +3431,8 @@ mod tests {
         });
 
         multi_workspace.update_in(cx, |mw, window, cx| {
-            mw.activate_next_workspace(window, cx);
+            let next_index = (mw.active_workspace_index() + 1) % mw.workspaces().len();
+            mw.activate_index(next_index, window, cx);
         });
         cx.run_until_parked();
 
@@ -3477,7 +3505,7 @@ mod tests {
         // Clicking into the thread (simulated by focusing its view) should
         // set focused_thread via the ThreadFocused event.
         panel_b.update_in(cx, |panel, window, cx| {
-            if let Some(thread_view) = panel.active_connection_view() {
+            if let Some(thread_view) = panel.active_conversation_view() {
                 thread_view.read(cx).focus_handle(cx).focus(window, cx);
             }
         });
