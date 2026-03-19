@@ -1686,8 +1686,9 @@ async fn restore_superzent_startup_workspace(
         });
     let fallback_local_workspace = cx.update(|cx| {
         let store = store.read(cx);
-        let startup_local_workspace_id =
-            startup_local_workspace.as_ref().map(|(workspace_id, _)| workspace_id.as_str());
+        let startup_local_workspace_id = startup_local_workspace
+            .as_ref()
+            .map(|(workspace_id, _)| workspace_id.as_str());
 
         store
             .workspaces()

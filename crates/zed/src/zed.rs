@@ -6322,9 +6322,7 @@ mod tests {
     }
 
     #[gpui::test]
-    async fn test_superzent_startup_restores_only_startup_workspace(
-        cx: &mut TestAppContext,
-    ) {
+    async fn test_superzent_startup_restores_only_startup_workspace(cx: &mut TestAppContext) {
         use session::Session;
         use workspace::Workspace;
 
@@ -6391,7 +6389,11 @@ mod tests {
         let locations = workspace::last_session_workspace_locations(&session_id, None, fs.as_ref())
             .await
             .expect("expected session workspace locations");
-        assert_eq!(locations.len(), 2, "expected both workspaces to be serialized");
+        assert_eq!(
+            locations.len(),
+            2,
+            "expected both workspaces to be serialized"
+        );
 
         window
             .update(cx, |_, window, _| window.remove_window())
@@ -6417,7 +6419,11 @@ mod tests {
                 .filter_map(|window| window.downcast::<MultiWorkspace>())
                 .collect()
         });
-        assert_eq!(restored_windows.len(), 1, "expected a single restored window");
+        assert_eq!(
+            restored_windows.len(),
+            1,
+            "expected a single restored window"
+        );
 
         let dir1_path: Arc<Path> = Path::new(dir1).into();
         let dir2_path: Arc<Path> = Path::new(dir2).into();
@@ -6448,13 +6454,11 @@ mod tests {
     }
 
     #[gpui::test]
-    async fn test_superzent_startup_falls_back_to_latest_local_workspace(
-        cx: &mut TestAppContext,
-    ) {
+    async fn test_superzent_startup_falls_back_to_latest_local_workspace(cx: &mut TestAppContext) {
         use chrono::{Duration, Utc};
         use superzent_model::{
-            ProjectEntry, ProjectLocation, SuperzentStore, WorkspaceAttentionStatus, WorkspaceEntry,
-            WorkspaceGitStatus, WorkspaceKind, WorkspaceLocation,
+            ProjectEntry, ProjectLocation, SuperzentStore, WorkspaceAttentionStatus,
+            WorkspaceEntry, WorkspaceGitStatus, WorkspaceKind, WorkspaceLocation,
         };
 
         let app_state = init_superzent_test(cx);
@@ -6557,7 +6561,11 @@ mod tests {
                 .filter_map(|window| window.downcast::<MultiWorkspace>())
                 .collect()
         });
-        assert_eq!(restored_windows.len(), 1, "expected a single restored window");
+        assert_eq!(
+            restored_windows.len(),
+            1,
+            "expected a single restored window"
+        );
 
         let newer_dir: Arc<Path> = newer_dir.into();
         let restored_paths = restored_windows[0]

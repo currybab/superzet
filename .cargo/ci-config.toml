@@ -15,4 +15,7 @@ rustflags = ["-D", "warnings"]
 [profile.dev]
 debug = "limited"
 
+[net]
+# Git CLI fetches submodules more reliably than libgit2 on GitHub macOS runners.
+git-fetch-with-cli = true
 
