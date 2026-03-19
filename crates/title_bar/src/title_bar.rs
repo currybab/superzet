@@ -312,7 +312,7 @@ impl TitleBar {
                         return;
                     };
 
-                    let is_open = multi_workspace.read(cx).is_sidebar_open();
+                    let is_open = multi_workspace.read(cx).sidebar_open();
                     let has_notifications = multi_workspace.read(cx).sidebar_has_notifications(cx);
                     platform_titlebar.update(cx, |titlebar, cx| {
                         titlebar.set_workspace_sidebar_open(is_open, cx);
@@ -321,7 +321,7 @@ impl TitleBar {
 
                     let platform_titlebar = platform_titlebar.clone();
                     let subscription = cx.observe(&multi_workspace, move |mw, cx| {
-                        let is_open = mw.read(cx).is_sidebar_open();
+                        let is_open = mw.read(cx).sidebar_open();
                         let has_notifications = mw.read(cx).sidebar_has_notifications(cx);
                         platform_titlebar.update(cx, |titlebar, cx| {
                             titlebar.set_workspace_sidebar_open(is_open, cx);
@@ -640,10 +640,7 @@ impl TitleBar {
             .style(ButtonStyle::Tinted(TintColor::Warning))
             .label_size(LabelSize::Small)
             .color(Color::Warning)
-            .icon(IconName::Warning)
-            .icon_color(Color::Warning)
-            .icon_size(IconSize::Small)
-            .icon_position(IconPosition::Start)
+            .start_icon(Icon::new(IconName::Warning).color(Color::Warning).size(IconSize::Small))
             .tooltip(|_, cx| {
                 Tooltip::with_meta(
                     "You're in Restricted Mode",
@@ -727,9 +724,9 @@ impl TitleBar {
         let is_sidebar_open = self.platform_titlebar.read(cx).is_workspace_sidebar_open();
         let has_notifications = self.platform_titlebar.read(cx).sidebar_has_notifications();
         let icon = if is_sidebar_open {
-            IconName::WorkspaceNavOpen
+            IconName::ThreadsSidebarLeftOpen
         } else {
-            IconName::WorkspaceNavClosed
+            IconName::ThreadsSidebarLeftClosed
         };
 
         Some(
@@ -779,6 +776,7 @@ impl TitleBar {
             .menu(move |window, cx| {
                 Some(recent_projects::RecentProjects::popover(
                     workspace.clone(),
+                    Default::default(),
                     false,
                     focus_handle.clone(),
                     window,
@@ -789,9 +787,11 @@ impl TitleBar {
                 Button::new("project_name_trigger", display_name)
                     .label_size(LabelSize::Small)
                     .when(self.worktree_count(cx) > 1, |this| {
-                        this.icon(IconName::ChevronDown)
-                            .icon_color(Color::Muted)
-                            .icon_size(IconSize::XSmall)
+                        this.end_icon(
+                            Icon::new(IconName::ChevronDown)
+                                .color(Color::Muted)
+                                .size(IconSize::XSmall),
+                        )
                     })
                     .selected_style(ButtonStyle::Tinted(TintColor::Accent))
                     .when(!is_project_selected, |s| s.color(Color::Muted)),
@@ -872,10 +872,11 @@ impl TitleBar {
                         .when(settings.show_branch_icon, |branch_button| {
                             let (icon, icon_color) = icon_info;
                             branch_button
-                                .icon(icon)
-                                .icon_position(IconPosition::Start)
-                                .icon_color(icon_color)
-                                .icon_size(IconSize::Indicator)
+                                .start_icon(
+                                    Icon::new(icon)
+                                        .color(icon_color)
+                                        .size(IconSize::Indicator),
+                                )
                         }),
                     move |_window, cx| {
                         Tooltip::with_meta(
@@ -1065,9 +1066,9 @@ impl TitleBar {
                                     let user_store = user_store.clone();
                                     let organization = organization.clone();
                                     move |_window, cx| {
-                                        user_store.update(cx, |user_store, _cx| {
+                                        user_store.update(cx, |user_store, cx| {
                                             user_store
-                                                .set_current_organization(organization.clone());
+                                                .set_current_organization(organization.clone(), cx);
                                         });
                                     }
                                 },

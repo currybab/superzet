@@ -1,6 +1,5 @@
-use agent_ui::{AgentPanel, ExternalAgent, NewExternalAgentThread, OpenHistory};
+use agent_ui::{Agent, AgentPanel, NewExternalAgentThread, OpenHistory};
 use gpui::{Action, App, Context, Window, actions};
-use project::agent_server_store::{CLAUDE_AGENT_NAME, CODEX_NAME, GEMINI_NAME};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use settings::update_settings_file;
@@ -8,6 +7,10 @@ use workspace::Workspace;
 use zed_actions::assistant::ToggleFocus;
 
 actions!(superzent, [FocusAcpTab]);
+
+pub(crate) const CLAUDE_AGENT_NAME: &str = "claude";
+pub(crate) const CODEX_NAME: &str = "codex";
+pub(crate) const GEMINI_NAME: &str = "gemini";
 
 #[derive(Clone, Default, PartialEq, Deserialize, JsonSchema, Action)]
 #[action(namespace = superzent)]
@@ -40,8 +43,8 @@ pub(crate) fn init(cx: &mut App) {
                     }
 
                     let agent_name = match action.agent() {
-                        Some(ExternalAgent::Custom { name }) => Some(name.to_string()),
-                        Some(ExternalAgent::NativeAgent) => {
+                        Some(Agent::Custom { id }) => Some(id.to_string()),
+                        Some(Agent::NativeAgent) => {
                             show_native_agent_toast(workspace, cx);
                             return;
                         }

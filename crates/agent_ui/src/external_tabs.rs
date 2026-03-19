@@ -14,7 +14,7 @@ use gpui::{
     App, Context, Entity, EntityId, EventEmitter, FocusHandle, Focusable, Pixels, Render,
     SharedString, Subscription, Task, WeakEntity, Window,
 };
-use project::{Project, agent_server_store::ExternalAgentServerName};
+use project::{AgentId, Project};
 use serde::{Deserialize, Serialize};
 use ui::{Color, Icon, IconName, Label, prelude::*};
 use util::ResultExt as _;
@@ -22,7 +22,7 @@ use workspace::item::TabContentParams;
 use workspace::{Item, Pane, Toast, Workspace, notifications::NotificationId};
 
 use crate::{
-    AgentInitialContent, ConnectionView, ExternalAgent,
+    Agent, AgentInitialContent, ConnectionView, agent_connection_store::AgentConnectionStore,
     thread_history::{ThreadHistory, ThreadHistoryEvent, ThreadHistoryOptions},
 };
 
@@ -31,7 +31,7 @@ const ACP_TAB_TITLE_MAX_WIDTH: Pixels = px(175.);
 
 #[derive(Serialize, Deserialize)]
 struct LastUsedExternalAgent {
-    agent: ExternalAgent,
+    agent: Agent,
 }
 
 pub fn open_external_acp_tab(
@@ -319,8 +319,8 @@ fn open_external_acp_tab_for_agent(
     let project = workspace.project().clone();
     let display_name = agent_display_name(&project, &agent_name, cx);
     let icon_path = agent_icon_path(&project, &agent_name, cx);
-    let server = ExternalAgent::Custom {
-        name: agent_name.clone(),
+    let server = Agent::Custom {
+        id: AgentId::new(agent_name.clone()),
     }
     .server(<dyn Fs>::global(cx), ThreadStore::global(cx));
     let thread_store = server
@@ -444,15 +444,17 @@ fn read_last_used_external_agent() -> Option<SharedString> {
         .flatten()
         .and_then(|value| serde_json::from_str::<LastUsedExternalAgent>(&value).log_err())
         .and_then(|entry| match entry.agent {
-            ExternalAgent::Custom { name } => Some(name),
-            ExternalAgent::NativeAgent => None,
+            Agent::Custom { id } => Some(id.into()),
+            Agent::NativeAgent => None,
         })
 }
 
 fn remember_last_used_external_agent(agent_name: SharedString, cx: &mut App) {
     cx.background_spawn(async move {
         let Some(serialized) = serde_json::to_string(&LastUsedExternalAgent {
-            agent: ExternalAgent::Custom { name: agent_name },
+            agent: Agent::Custom {
+                id: AgentId::new(agent_name),
+            },
         })
         .log_err() else {
             return;
@@ -471,10 +473,11 @@ fn agent_display_name(
     agent_name: &SharedString,
     cx: &App,
 ) -> SharedString {
+    let agent_id = AgentId::new(agent_name.clone());
     let agent_server_store = project.read(cx).agent_server_store().clone();
     agent_server_store
         .read(cx)
-        .agent_display_name(&ExternalAgentServerName(agent_name.clone()))
+        .agent_display_name(&agent_id)
         .unwrap_or_else(|| agent_name.clone())
 }
 
@@ -483,15 +486,16 @@ fn agent_icon_path(
     agent_name: &SharedString,
     cx: &App,
 ) -> Option<SharedString> {
+    let agent_id = AgentId::new(agent_name.clone());
     let agent_server_store = project.read(cx).agent_server_store().clone();
     agent_server_store
         .read(cx)
-        .agent_icon(&ExternalAgentServerName(agent_name.clone()))
+        .agent_icon(&agent_id)
         .or_else(|| {
             project::AgentRegistryStore::try_global(cx).and_then(|registry_store| {
                 registry_store
                     .read(cx)
-                    .agent(agent_name.as_ref())
+                    .agent(&agent_id)
                     .and_then(|agent| agent.icon_path().cloned())
             })
         })
@@ -547,10 +551,12 @@ impl ProjectFilteredSessionList {
             .sessions
             .into_iter()
             .filter(|session| {
-                session.cwd.as_ref().is_some_and(|cwd| {
-                    workspace_root_paths
-                        .iter()
-                        .any(|root_path| cwd.starts_with(root_path))
+                session.work_dirs.as_ref().is_some_and(|work_dirs| {
+                    work_dirs.paths().iter().any(|work_dir| {
+                        workspace_root_paths
+                            .iter()
+                            .any(|root_path| work_dir.starts_with(root_path))
+                    })
                 })
             })
             .collect();
@@ -611,7 +617,6 @@ struct ExternalAcpTabItem {
     project: Entity<Project>,
     thread_store: Option<Entity<ThreadStore>>,
     connection_view: Entity<ConnectionView>,
-    connection_history: Entity<ThreadHistory>,
     history_view: Entity<ThreadHistory>,
     history_mode: ExternalAcpTabMode,
     history_workspace_root_paths: Option<Vec<PathBuf>>,
@@ -641,7 +646,6 @@ impl ExternalAcpTabItem {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let connection_history = cx.new(|cx| ThreadHistory::new(None, window, cx));
         let history_view = cx.new(|cx| {
             ThreadHistory::new_with_options(
                 None,
@@ -654,11 +658,11 @@ impl ExternalAcpTabItem {
             )
         });
         let connection_view = Self::build_connection_view(
+            agent_name.clone(),
             server.clone(),
             workspace.clone(),
             project.clone(),
             thread_store.clone(),
-            connection_history.clone(),
             resume_thread,
             prompt,
             window,
@@ -667,10 +671,7 @@ impl ExternalAcpTabItem {
         let current_tab_id = cx.entity_id();
 
         let subscriptions = vec![
-            cx.observe(&connection_view, |_, _, cx| {
-                cx.notify();
-            }),
-            cx.observe(&connection_history, |this, _, cx| {
+            cx.observe(&connection_view, |this, _, cx| {
                 this.sync_history_view_session_list(false, cx);
                 cx.notify();
             }),
@@ -720,7 +721,6 @@ impl ExternalAcpTabItem {
             project,
             thread_store,
             connection_view,
-            connection_history,
             history_view,
             history_mode: ExternalAcpTabMode::Conversation,
             history_workspace_root_paths: None,
@@ -731,16 +731,23 @@ impl ExternalAcpTabItem {
 
     #[allow(clippy::too_many_arguments)]
     fn build_connection_view(
+        agent_name: SharedString,
         server: Rc<dyn AgentServer>,
         workspace: WeakEntity<Workspace>,
         project: Entity<Project>,
         thread_store: Option<Entity<ThreadStore>>,
-        connection_history: Entity<ThreadHistory>,
         resume_thread: Option<AgentSessionInfo>,
         prompt: Option<String>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Entity<ConnectionView> {
+        let connection_store = cx.new(|cx| AgentConnectionStore::new(project.clone(), cx));
+        let connection_key = Agent::Custom {
+            id: AgentId::new(agent_name),
+        };
+        let resume_session_id = resume_thread.as_ref().map(|thread| thread.session_id.clone());
+        let work_dirs = resume_thread.as_ref().and_then(|thread| thread.work_dirs.clone());
+        let title = resume_thread.as_ref().and_then(|thread| thread.title.clone());
         let initial_content = prompt.map(|text| AgentInitialContent::ContentBlock {
             blocks: vec![acp::ContentBlock::Text(acp::TextContent::new(text))],
             auto_submit: false,
@@ -749,13 +756,16 @@ impl ExternalAcpTabItem {
         cx.new(|cx| {
             ConnectionView::new(
                 server,
-                resume_thread,
+                connection_store,
+                connection_key,
+                resume_session_id,
+                work_dirs,
+                title,
                 initial_content,
                 workspace,
                 project,
                 thread_store,
                 None,
-                connection_history,
                 window,
                 cx,
             )
@@ -798,7 +808,11 @@ impl ExternalAcpTabItem {
             return;
         };
 
-        let next_source = self.connection_history.read(cx).session_list();
+        let next_source = self
+            .connection_view
+            .read(cx)
+            .history()
+            .and_then(|history| history.read(cx).session_list());
         let source_changed = match (&self.history_source_session_list, &next_source) {
             (Some(current), Some(next)) => !Rc::ptr_eq(current, next),
             (None, None) => false,
@@ -827,11 +841,11 @@ impl ExternalAcpTabItem {
         cx: &mut Context<Self>,
     ) {
         let connection_view = Self::build_connection_view(
+            self.agent_name.clone(),
             self.server.clone(),
             self.workspace.clone(),
             self.project.clone(),
             self.thread_store.clone(),
-            self.connection_history.clone(),
             Some(thread),
             None,
             window,
@@ -943,12 +957,10 @@ impl ExternalAcpHistoryItem {
         let focus_handle = cx.focus_handle();
         let delegate = AgentServerDelegate::new(
             project.read(cx).agent_server_store().clone(),
-            project.clone(),
-            None,
             None,
         );
-        let server = ExternalAgent::Custom {
-            name: agent_name.clone(),
+        let server = Agent::Custom {
+            id: AgentId::new(agent_name.clone()),
         }
         .server(<dyn Fs>::global(cx), ThreadStore::global(cx));
         let connect_task = server.connect(delegate, cx);

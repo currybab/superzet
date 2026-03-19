@@ -9,12 +9,16 @@ use futures::AsyncReadExt;
 use gpui::{App, AppContext as _, Context, Entity, Global, SharedString, Task};
 use http_client::{AsyncBody, HttpClient};
 use serde::Deserialize;
+use settings::Settings as _;
+
+use crate::{AgentId, DisableAiSettings};
+
 const REGISTRY_URL: &str = "https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json";
 const REFRESH_THROTTLE_DURATION: Duration = Duration::from_secs(60 * 60);
 
 #[derive(Clone, Debug)]
 pub struct RegistryAgentMetadata {
-    pub id: SharedString,
+    pub id: AgentId,
     pub name: SharedString,
     pub description: SharedString,
     pub version: SharedString,
@@ -51,7 +55,7 @@ impl RegistryAgent {
         }
     }
 
-    pub fn id(&self) -> &SharedString {
+    pub fn id(&self) -> &AgentId {
         &self.metadata().id
     }
 
@@ -143,12 +147,28 @@ impl AgentRegistryStore {
             .map(|store| store.0.clone())
     }
 
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn init_test_global(cx: &mut App, agents: Vec<RegistryAgent>) -> Entity<Self> {
+        let fs: Arc<dyn Fs> = fs::FakeFs::new(cx.background_executor().clone());
+        let store = cx.new(|_cx| Self {
+            fs,
+            http_client: http_client::FakeHttpClient::with_404_response(),
+            agents,
+            is_fetching: false,
+            fetch_error: None,
+            pending_refresh: None,
+            last_refresh: None,
+        });
+        cx.set_global(GlobalAgentRegistryStore(store.clone()));
+        store
+    }
+
     pub fn agents(&self) -> &[RegistryAgent] {
         &self.agents
     }
 
-    pub fn agent(&self, id: &str) -> Option<&RegistryAgent> {
-        self.agents.iter().find(|agent| agent.id().as_ref() == id)
+    pub fn agent(&self, id: &AgentId) -> Option<&RegistryAgent> {
+        self.agents.iter().find(|agent| agent.id() == id)
     }
 
     pub fn is_fetching(&self) -> bool {
@@ -164,15 +184,13 @@ impl AgentRegistryStore {
     /// This will fetch the latest registry data and update the cache.
     pub fn refresh(&mut self, cx: &mut Context<Self>) {
         if self.pending_refresh.is_some() {
-            log::info!("AgentRegistryStore::refresh skipped: fetch already in progress");
             return;
         }
 
-        log::info!(
-            "AgentRegistryStore::refresh starting: url={}, cache_path={}",
-            REGISTRY_URL,
-            registry_cache_path().display()
-        );
+        if DisableAiSettings::get_global(cx).disable_ai {
+            return;
+        }
+
         self.is_fetching = true;
         self.fetch_error = None;
         self.last_refresh = Some(Instant::now());
@@ -198,15 +216,10 @@ impl AgentRegistryStore {
                 this.is_fetching = false;
                 match result {
                     Ok(agents) => {
-                        log::info!(
-                            "AgentRegistryStore::refresh succeeded: {} agents loaded",
-                            agents.len()
-                        );
                         this.agents = agents;
                         this.fetch_error = None;
                     }
                     Err(error) => {
-                        log::error!("AgentRegistryStore::refresh failed: {error:#}");
                         this.fetch_error = Some(SharedString::from(error.to_string()));
                     }
                 }
@@ -254,20 +267,16 @@ impl AgentRegistryStore {
         http_client: Arc<dyn HttpClient>,
         cx: &mut Context<Self>,
     ) {
+        if DisableAiSettings::get_global(cx).disable_ai {
+            return;
+        }
+
         cx.spawn(async move |this, cx| -> Result<()> {
             let cache_path = registry_cache_path();
             if !fs.is_file(&cache_path).await {
-                log::info!(
-                    "AgentRegistryStore::load_cached_registry: no cache at {}",
-                    cache_path.display()
-                );
                 return Ok(());
             }
 
-            log::info!(
-                "AgentRegistryStore::load_cached_registry: reading {}",
-                cache_path.display()
-            );
             let bytes = fs
                 .load_bytes(&cache_path)
                 .await
@@ -278,10 +287,6 @@ impl AgentRegistryStore {
             let agents = build_registry_agents(fs, http_client, index, bytes, false).await?;
 
             this.update(cx, |this, cx| {
-                log::info!(
-                    "AgentRegistryStore::load_cached_registry: loaded {} agents",
-                    agents.len()
-                );
                 this.agents = agents;
                 cx.notify();
             })?;
@@ -298,7 +303,6 @@ struct RegistryFetchResult {
 }
 
 async fn fetch_registry_index(http_client: Arc<dyn HttpClient>) -> Result<RegistryFetchResult> {
-    log::info!("AgentRegistryStore::fetch_registry_index requesting {REGISTRY_URL}");
     let mut response = http_client
         .get(REGISTRY_URL, AsyncBody::default(), true)
         .await
@@ -320,11 +324,6 @@ async fn fetch_registry_index(http_client: Arc<dyn HttpClient>) -> Result<Regist
     }
 
     let index: RegistryIndex = serde_json::from_slice(&body).context("parsing ACP registry")?;
-    log::info!(
-        "AgentRegistryStore::fetch_registry_index response received: status={}, agents={}",
-        response.status().as_u16(),
-        index.agents.len()
-    );
     Ok(RegistryFetchResult {
         index,
         raw_body: body,
@@ -340,11 +339,6 @@ async fn build_registry_agents(
 ) -> Result<Vec<RegistryAgent>> {
     let cache_dir = registry_cache_dir();
     fs.create_dir(&cache_dir).await?;
-    log::info!(
-        "AgentRegistryStore::build_registry_agents: update_cache={}, cache_dir={}",
-        update_cache,
-        cache_dir.display()
-    );
 
     let cache_path = cache_dir.join("registry.json");
     if update_cache {
@@ -370,7 +364,7 @@ async fn build_registry_agents(
         .await?;
 
         let metadata = RegistryAgentMetadata {
-            id: entry.id.into(),
+            id: AgentId::new(entry.id),
             name: entry.name.into(),
             description: entry.description.into(),
             version: entry.version.into(),
@@ -431,10 +425,6 @@ async fn build_registry_agents(
         agents.push(agent);
     }
 
-    log::info!(
-        "AgentRegistryStore::build_registry_agents: built {} compatible agents",
-        agents.len()
-    );
     Ok(agents)
 }
 

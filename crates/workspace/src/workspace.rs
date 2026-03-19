@@ -239,6 +239,14 @@ impl Default for Open {
     }
 }
 
+/// Opens the notes for a specific collaboration channel.
+#[derive(Clone, PartialEq, Deserialize, JsonSchema, Action)]
+#[action(namespace = collab)]
+#[serde(deny_unknown_fields)]
+pub struct OpenChannelNotesById {
+    pub channel_id: u64,
+}
+
 actions!(
     workspace,
     [
@@ -7353,6 +7361,11 @@ impl GlobalAnyActiveCall {
         cx.global()
     }
 }
+pub fn merge_conflict_notification_id() -> NotificationId {
+    struct MergeConflictNotification;
+    NotificationId::unique::<MergeConflictNotification>()
+}
+
 /// Workspace-local view of a remote participant's location.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ParticipantLocation {

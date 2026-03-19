@@ -42,7 +42,7 @@ use std::{
     path::{Path, PathBuf},
     process,
     rc::Rc,
-    sync::{Arc, OnceLock},
+    sync::{Arc, LazyLock, OnceLock},
     time::Instant,
 };
 use theme::{ActiveTheme, GlobalTheme, ThemeRegistry};
@@ -356,7 +356,7 @@ fn main() {
 
     zlog::init();
 
-    if true {
+    if stdout_is_a_pty() {
         zlog::init_output_stdout();
     } else {
         let result = zlog::init_output_file(paths::log_file(), Some(paths::old_log_file()));
@@ -738,8 +738,9 @@ fn main() {
         snippet_provider::init(cx);
         #[cfg(feature = "acp_tabs")]
         {
-            language_model::init(app_state.client.clone(), cx);
+            language_model::init(app_state.user_store.clone(), app_state.client.clone(), cx);
             language_models::init(app_state.user_store.clone(), app_state.client.clone(), cx);
+            acp_tools::init(cx);
             web_search_providers::init(app_state.client.clone(), app_state.user_store.clone(), cx);
             project::AgentRegistryStore::init_global(
                 cx,
@@ -1010,18 +1011,23 @@ fn handle_open_request(request: OpenRequest, app_state: Arc<AppState>, cx: &mut 
                 })
                 .detach_and_log_err(cx);
             }
-            OpenRequestKind::AgentPanel { initial_prompt } => {
+            OpenRequestKind::AgentPanel {
+                external_source_prompt,
+            } => {
                 #[cfg(feature = "acp_tabs")]
                 cx.spawn(async move |cx| {
                     let multi_workspace =
                         workspace::get_any_active_multi_workspace(app_state, cx.clone()).await?;
+                    let prompt = external_source_prompt
+                        .as_ref()
+                        .map(|prompt| prompt.as_str().to_owned());
 
                     multi_workspace.update(cx, |multi_workspace, window, cx| {
                         multi_workspace.workspace().update(cx, |_workspace, cx| {
                             window.dispatch_action(
                                 Box::new(NewAcpTab {
                                     agent_name: None,
-                                    prompt: initial_prompt.clone(),
+                                    prompt: prompt.clone(),
                                 }),
                                 cx,
                             );
@@ -1031,7 +1037,7 @@ fn handle_open_request(request: OpenRequest, app_state: Arc<AppState>, cx: &mut 
                 .detach_and_log_err(cx);
                 #[cfg(not(feature = "acp_tabs"))]
                 {
-                    let _ = initial_prompt;
+                    let _ = external_source_prompt;
                     log::warn!("Ignoring agent panel open request in lite build");
                 }
             }
@@ -1084,21 +1090,19 @@ fn handle_open_request(request: OpenRequest, app_state: Arc<AppState>, cx: &mut 
                         })
                         .await?;
 
-                    let thread_metadata = acp_thread::AgentSessionInfo {
-                        session_id,
-                        cwd: None,
-                        title: Some(format!("🔗 {}", response.title).into()),
-                        updated_at: Some(chrono::Utc::now()),
-                        meta: None,
-                    };
-
                     let sharer_username = response.sharer_username.clone();
 
                     multi_workspace.update(cx, |_, window, cx| {
                         workspace.update(cx, |workspace, cx| {
                             if let Some(panel) = workspace.panel::<AgentPanel>(cx) {
                                 panel.update(cx, |panel, cx| {
-                                    panel.open_thread(thread_metadata, window, cx);
+                                    panel.open_thread(
+                                        session_id,
+                                        None,
+                                        Some(format!("🔗 {}", response.title).into()),
+                                        window,
+                                        cx,
+                                    );
                                 });
                                 panel.focus_handle(cx).focus(window, cx);
                             }
@@ -1946,8 +1950,14 @@ fn init_paths() -> HashMap<io::ErrorKind, Vec<&'static Path>> {
     })
 }
 
+pub(crate) static FORCE_CLI_MODE: LazyLock<bool> = LazyLock::new(|| {
+    let env_var = std::env::var(FORCE_CLI_MODE_ENV_VAR_NAME).ok().is_some();
+    unsafe { std::env::remove_var(FORCE_CLI_MODE_ENV_VAR_NAME) };
+    env_var
+});
+
 fn stdout_is_a_pty() -> bool {
-    std::env::var(FORCE_CLI_MODE_ENV_VAR_NAME).ok().is_none() && io::stdout().is_terminal()
+    !*FORCE_CLI_MODE && io::stdout().is_terminal()
 }
 
 #[derive(Parser, Debug)]

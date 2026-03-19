@@ -17,6 +17,7 @@ workspace = true
 default = ["lite", "acp_tabs"]
 lite = []
 acp_tabs = [
+    "dep:acp_tools",
     "dep:agent",
     "dep:agent_ui",
     "dep:language_model",

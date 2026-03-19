@@ -6,7 +6,7 @@ use superzent_model::{
     AgentPreset, AgentPresetDraft, PresetLaunchMode, SuperzentStore, suggested_acp_agent_name,
 };
 use ui::{
-    Button, ButtonStyle, Color, Divider, IconName, IconPosition, IconSize, Label, Tooltip,
+    Button, ButtonStyle, Color, Divider, Icon, IconName, IconSize, Label, Tooltip,
     prelude::*,
 };
 
@@ -532,7 +532,7 @@ impl Render for AgentPresetsPage {
                     .child(
                         Button::new("superzent-add-preset", "Add Preset")
                             .style(ButtonStyle::Filled)
-                            .icon(IconName::Plus)
+                            .start_icon(Icon::new(IconName::Plus).size(IconSize::Small))
                             .on_click(cx.listener(|this, _, _, cx| this.add_preset(cx))),
                     ),
             )
@@ -617,9 +617,7 @@ fn render_launch_mode_field(
                         format!("superzent-preset-mode-acp-{}", preset.id),
                         "ACP Chat",
                     )
-                    .icon(IconName::Flask)
-                    .icon_position(IconPosition::End)
-                    .icon_size(IconSize::Small)
+                    .end_icon(Icon::new(IconName::Flask).size(IconSize::Small))
                     .tooltip(Tooltip::text("ACP Chat (Experimental)"))
                     .style(if current_launch_mode == PresetLaunchMode::Acp {
                         ButtonStyle::Filled

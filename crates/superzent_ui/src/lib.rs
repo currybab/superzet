@@ -4,6 +4,8 @@ mod acp_tabs;
 pub use acp_tabs::{FocusAcpTab, NewAcpTab, OpenAcpHistory};
 
 #[cfg(feature = "acp_tabs")]
+use crate::acp_tabs::{CLAUDE_AGENT_NAME, CODEX_NAME, GEMINI_NAME};
+#[cfg(feature = "acp_tabs")]
 use agent_ui::{
     AgentNotification, AgentNotificationEvent, open_external_acp_tab, pane_has_external_acp_item,
 };
@@ -33,11 +35,9 @@ use objc::{
     sel, sel_impl,
 };
 #[cfg(feature = "acp_tabs")]
-use project::AgentRegistryStore;
+use project::{AgentId, AgentRegistryStore};
 #[cfg(feature = "acp_tabs")]
 use project::agent_server_store::{AllAgentServersSettings, CustomAgentServerSettings};
-#[cfg(feature = "acp_tabs")]
-use project::agent_server_store::{CLAUDE_AGENT_NAME, CODEX_NAME, GEMINI_NAME};
 use project::git_store::{GitStoreEvent, Repository, RepositoryEvent, pending_op};
 use project::project_settings::ProjectSettings;
 use project_panel::ProjectPanel;
@@ -1093,7 +1093,8 @@ fn refresh_registry_agent_if_needed(agent_name: &str, cx: &mut App) {
     if let Some(registry_store) = AgentRegistryStore::try_global(cx) {
         let should_refresh = {
             let registry_store = registry_store.read(cx);
-            registry_store.agent(agent_name).is_none() || registry_store.fetch_error().is_some()
+            let agent_id = AgentId::new(agent_name.to_string());
+            registry_store.agent(&agent_id).is_none() || registry_store.fetch_error().is_some()
         };
         if should_refresh {
             registry_store.update(cx, |registry_store, cx| registry_store.refresh(cx));
@@ -1224,9 +1225,10 @@ async fn wait_for_acp_agent_registration(
                 return AcpAgentRegistrationWaitResult::TimedOut;
             };
             let registry_store = registry_store.read(cx);
+            let agent_id = AgentId::new(agent_name.to_string());
             if let Some(error) = registry_store.fetch_error()
                 && !registry_store.is_fetching()
-                && registry_store.agent(agent_name).is_none()
+                && registry_store.agent(&agent_id).is_none()
             {
                 return AcpAgentRegistrationWaitResult::RegistryFetchFailed(error.to_string());
             }
@@ -1855,8 +1857,9 @@ impl Render for AddProjectChooserModal {
                                 Button::new("superzent-add-local-project", "Local Project")
                                     .full_width()
                                     .style(ButtonStyle::Filled)
-                                    .icon(IconName::FolderOpen)
-                                    .icon_position(IconPosition::Start)
+                                    .start_icon(
+                                        Icon::new(IconName::FolderOpen).size(IconSize::Small),
+                                    )
                                     .on_click(cx.listener(
                                         |this, _: &ClickEvent, window, cx| {
                                             this.open_local(window, cx);
@@ -3091,8 +3094,7 @@ impl SuperzentEmptyPaneView {
     ) -> gpui::AnyElement {
         Button::new(format!("{id}-{}", self.pane_id), label)
             .full_width()
-            .icon(icon)
-            .icon_size(IconSize::Small)
+            .start_icon(Icon::new(icon).size(IconSize::Small))
             .label_size(LabelSize::Small)
             .style(if primary {
                 ui::ButtonStyle::Filled
@@ -3274,7 +3276,9 @@ impl Render for SuperzentSidebar {
                                 Button::new("superzent-sidebar-add-project", "Add Project")
                                     .full_width()
                                     .style(ui::ButtonStyle::Subtle)
-                                    .icon(IconName::FolderOpen)
+                                    .start_icon(
+                                        Icon::new(IconName::FolderOpen).size(IconSize::Small),
+                                    )
                                     .label_size(LabelSize::Small)
                                     .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
                                         if let Some(current_workspace) =
@@ -3318,6 +3322,12 @@ impl WorkspaceSidebar for SuperzentSidebar {
             .workspaces()
             .iter()
             .any(|workspace| workspace.attention_status != WorkspaceAttentionStatus::Idle)
+    }
+
+    fn toggle_recent_projects_popover(&self, _window: &mut Window, _cx: &mut App) {}
+
+    fn is_recent_projects_popover_deployed(&self) -> bool {
+        false
     }
 }
 
@@ -3549,7 +3559,9 @@ impl SuperzentRightSidebar {
         }
 
         Button::new(id, label)
-            .when_some(icon, |button, icon| button.icon(icon))
+            .when_some(icon, |button, icon| {
+                button.start_icon(Icon::new(icon).size(IconSize::Small))
+            })
             .label_size(LabelSize::Small)
             .style(ui::ButtonStyle::Subtle)
             .toggle_state(active)

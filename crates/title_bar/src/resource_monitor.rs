@@ -376,13 +376,12 @@ impl Render for ResourceMonitor {
             })
             .trigger_with_tooltip(
                 Button::new("resource-monitor-trigger", trigger_label)
-                    .icon(IconName::BoltOutlined)
-                    .icon_size(IconSize::XSmall)
+                    .start_icon(Icon::new(IconName::BoltOutlined).size(IconSize::XSmall))
                     .label_size(LabelSize::Small)
                     .style(button_style)
                     .selected_style(button_style)
                     .when(button_style == ButtonStyle::Subtle, |button| {
-                        button.color(Color::Muted).icon_color(Color::Muted)
+                        button.color(Color::Muted)
                     })
                     .size(ButtonSize::Compact),
                 Tooltip::text(tooltip),

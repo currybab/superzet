@@ -9,7 +9,7 @@ mod terminal_slash_command;
 use editor::{Editor, EditorSettings, actions::SelectAll, blink_manager::BlinkManager};
 use gpui::{
     Action, AnyElement, App, ClipboardEntry, DismissEvent, Entity, EventEmitter, ExternalPaths,
-    FocusHandle, Focusable, KeyContext, KeyDownEvent, Keystroke, MouseButton, MouseDownEvent,
+    FocusHandle, Focusable, Font, KeyContext, KeyDownEvent, Keystroke, MouseButton, MouseDownEvent,
     Pixels, Point, Render, ScrollWheelEvent, Styled, Subscription, Task, WeakEntity, actions,
     anchored, deferred, div,
 };
@@ -54,7 +54,7 @@ use workspace::{
     CloseActiveItem, DraggedSelection, DraggedTab, NewCenterTerminal, NewTerminal, Pane,
     ToolbarItemLocation, Workspace, WorkspaceId, delete_unloaded_items,
     item::{
-        BreadcrumbText, Item, ItemEvent, SerializableItem, TabContentParams, TabTooltipContent,
+        HighlightedText, Item, ItemEvent, SerializableItem, TabContentParams, TabTooltipContent,
     },
     register_serializable_item,
     searchable::{
@@ -1674,12 +1674,14 @@ impl Item for TerminalView {
         }
     }
 
-    fn breadcrumbs(&self, cx: &App) -> Option<Vec<BreadcrumbText>> {
-        Some(vec![BreadcrumbText {
-            text: self.terminal().read(cx).breadcrumb_text.clone(),
-            highlights: None,
-            font: None,
-        }])
+    fn breadcrumbs(&self, cx: &App) -> Option<(Vec<HighlightedText>, Option<Font>)> {
+        Some((
+            vec![HighlightedText {
+                text: self.terminal().read(cx).breadcrumb_text.clone().into(),
+                highlights: vec![],
+            }],
+            None,
+        ))
     }
 
     fn added_to_workspace(

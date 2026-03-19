@@ -403,6 +403,14 @@ impl ThreadHistory {
         }
     }
 
+    pub(crate) fn delete_sessions(&self, cx: &mut App) -> Task<anyhow::Result<()>> {
+        if let Some(session_list) = self.session_list.as_ref() {
+            session_list.delete_sessions(cx)
+        } else {
+            Task::ready(Ok(()))
+        }
+    }
+
     fn add_list_separators(
         &self,
         entries: Vec<AgentSessionInfo>,
@@ -1017,7 +1025,7 @@ impl RenderOnce for HistoryEntryElement {
                             move |_event, _window, cx| {
                                 if let Some(thread_view) = thread_view.upgrade() {
                                     thread_view.update(cx, |thread_view, cx| {
-                                        thread_view.delete_history_entry(entry.clone(), cx);
+                                        thread_view.delete_history_entry(&entry.session_id, cx);
                                     });
                                 }
                             }
@@ -1031,24 +1039,10 @@ impl RenderOnce for HistoryEntryElement {
                 let entry = self.entry;
 
                 move |_event, window, cx| {
-                    if let Some(workspace) = thread_view
-                        .upgrade()
-                        .and_then(|view| view.read(cx).workspace().upgrade())
-                    {
-                        if let Some(panel) = workspace.read(cx).panel::<AgentPanel>(cx) {
-                            panel.update(cx, |panel, cx| {
-                                panel.load_agent_thread(entry.clone(), window, cx);
-                            });
-                        } else {
-                            workspace.update(cx, |workspace, cx| {
-                                open_session_in_active_external_acp_tab(
-                                    workspace,
-                                    entry.clone(),
-                                    window,
-                                    cx,
-                                );
-                            });
-                        }
+                    if let Some(thread_view) = thread_view.upgrade() {
+                        thread_view.update(cx, |thread_view, cx| {
+                            thread_view.navigate_to_session(entry.session_id.clone(), window, cx);
+                        });
                     }
                 }
             })

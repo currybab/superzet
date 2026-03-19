@@ -17,7 +17,6 @@ use gpui::{
     EventEmitter, FocusHandle, Focusable, PromptLevel, ScrollHandle, Subscription, Task,
     WeakEntity, Window, canvas,
 };
-use language::Point;
 use log::{debug, info};
 use open_path_prompt::OpenPathDelegate;
 use paths::{global_ssh_config_file, user_ssh_config_file};
@@ -423,6 +422,7 @@ impl ProjectPicker {
         let (tx, rx) = oneshot::channel();
         let lister = project::DirectoryLister::Project(project.clone());
         let delegate = open_path_prompt::OpenPathDelegate::new(tx, lister, false, cx)
+            .show_hidden()
             .browse_directories_on_confirm()
             .directories_only();
         let initial_query = project_picker_initial_query(&home_dir);
@@ -542,11 +542,15 @@ impl ProjectPicker {
                                         active_editor.update(cx, |editor, cx| {
                                             let row = row.saturating_sub(1);
                                             let col = path.column.unwrap_or(0).saturating_sub(1);
-                                            editor.go_to_singleton_buffer_point(
-                                                Point::new(row, col),
-                                                window,
-                                                cx,
-                                            );
+                                            let Some(buffer) =
+                                                editor.buffer().read(cx).as_singleton()
+                                            else {
+                                                return;
+                                            };
+                                            let buffer_snapshot = buffer.read(cx).snapshot();
+                                            let point =
+                                                buffer_snapshot.point_from_external_input(row, col);
+                                            editor.go_to_singleton_buffer_point(point, window, cx);
                                         });
                                     })
                                     .ok();
@@ -1679,7 +1683,9 @@ impl RemoteServerProjects {
 
     fn delete_ssh_server(&mut self, server: SshServerIndex, cx: &mut Context<Self>) {
         self.update_settings_file(cx, move |setting, _| {
-            if let Some(connections) = setting.ssh_connections.as_mut() {
+            if let Some(connections) = setting.ssh_connections.as_mut()
+                && connections.get(server.0).is_some()
+            {
                 connections.remove(server.0);
             }
         });
@@ -2138,8 +2144,10 @@ impl RemoteServerProjects {
                                     .child(
                                         Button::new("learn-more", "Learn More")
                                             .label_size(LabelSize::Small)
-                                            .icon(IconName::ArrowUpRight)
-                                            .icon_size(IconSize::XSmall)
+                                            .end_icon(
+                                                Icon::new(IconName::ArrowUpRight)
+                                                    .size(IconSize::XSmall),
+                                            )
                                             .on_click(|_, _, cx| {
                                                 cx.open_url(
                                                     "https://superzent.dev/docs/remote-development",

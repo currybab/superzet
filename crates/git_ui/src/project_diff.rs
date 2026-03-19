@@ -37,7 +37,7 @@ use smol::future::yield_now;
 use std::any::{Any, TypeId};
 use std::sync::Arc;
 use theme::ActiveTheme;
-use ui::{DiffStat, Divider, KeyBinding, Tooltip, prelude::*, vertical_divider};
+use ui::{DiffStat, Divider, Icon, KeyBinding, Tooltip, prelude::*, vertical_divider};
 use util::{ResultExt as _, rel_path::RelPath};
 use workspace::{
     CloseActiveItem, ItemNavHistory, SerializableItem, ToolbarItemEvent, ToolbarItemLocation,
@@ -1601,8 +1601,7 @@ fn render_send_review_to_agent_button(review_count: usize, focus_handle: &FocusH
         "send-review",
         format!("Send Review to Agent ({})", review_count),
     )
-    .icon(IconName::ZedAssistant)
-    .icon_position(IconPosition::Start)
+    .start_icon(Icon::new(IconName::ZedAssistant).size(IconSize::Small))
     .tooltip(Tooltip::for_action_title_in(
         "Send all review comments to the Agent panel",
         &SendReviewToAgent,
@@ -1695,10 +1694,11 @@ impl Render for BranchDiffToolbar {
                 let focus_handle = focus_handle.clone();
                 this.child(Divider::vertical()).child(
                     Button::new("review-diff", "Review Diff")
-                        .icon(IconName::ZedAssistant)
-                        .icon_position(IconPosition::Start)
-                        .icon_size(IconSize::Small)
-                        .icon_color(Color::Muted)
+                        .start_icon(
+                            Icon::new(IconName::ZedAssistant)
+                                .size(IconSize::Small)
+                                .color(Color::Muted),
+                        )
                         .key_binding(KeyBinding::for_action_in(&ReviewDiff, &focus_handle, cx))
                         .tooltip(move |_, cx| {
                             Tooltip::with_meta_in(
