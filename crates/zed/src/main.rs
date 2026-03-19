@@ -1676,41 +1676,64 @@ async fn restore_superzent_startup_workspace(
     };
 
     let startup_workspace = cx.update(|cx| store.read(cx).startup_workspace().cloned());
+    let startup_local_workspace = startup_workspace
+        .as_ref()
+        .filter(|workspace| workspace.is_existing_path())
+        .and_then(|workspace| {
+            workspace
+                .local_worktree_path()
+                .map(|worktree_path| (workspace.id.clone(), PathBuf::from(worktree_path)))
+        });
     let fallback_local_workspace = cx.update(|cx| {
+        let store = store.read(cx);
+        let startup_local_workspace_id =
+            startup_local_workspace.as_ref().map(|(workspace_id, _)| workspace_id.as_str());
+
         store
-            .read(cx)
             .workspaces()
             .iter()
-            .find(|workspace| {
+            .filter(|workspace| {
                 matches!(
                     workspace.location,
                     superzent_model::WorkspaceLocation::Local { .. }
-                )
+                ) && workspace.is_existing_path()
+                    && Some(workspace.id.as_str()) != startup_local_workspace_id
             })
+            .max_by_key(|workspace| workspace.last_opened_at)
             .cloned()
+            .or_else(|| {
+                store
+                    .workspaces()
+                    .iter()
+                    .find(|workspace| {
+                        matches!(
+                            workspace.location,
+                            superzent_model::WorkspaceLocation::Local { .. }
+                        ) && workspace.is_existing_path()
+                            && Some(workspace.id.as_str()) != startup_local_workspace_id
+                    })
+                    .cloned()
+            })
     });
 
-    let Some(startup_workspace) = startup_workspace else {
-        return Ok(false);
-    };
-
-    if let Some(worktree_path) = startup_workspace.local_worktree_path().map(PathBuf::from) {
-        return restore_local_superzent_startup_workspace(
-            store,
-            startup_workspace.id,
+    if let Some((workspace_id, worktree_path)) = startup_local_workspace.clone()
+        && restore_local_superzent_startup_workspace(
+            store.clone(),
+            workspace_id,
             worktree_path,
-            app_state,
+            app_state.clone(),
             cx,
         )
-        .await;
+        .await?
+    {
+        return Ok(true);
     }
 
     if let Some(fallback_local_workspace) = fallback_local_workspace
         && let Some(worktree_path) = fallback_local_workspace
             .local_worktree_path()
             .map(PathBuf::from)
-    {
-        if restore_local_superzent_startup_workspace(
+        && restore_local_superzent_startup_workspace(
             store.clone(),
             fallback_local_workspace.id,
             worktree_path,
@@ -1718,9 +1741,8 @@ async fn restore_superzent_startup_workspace(
             cx,
         )
         .await?
-        {
-            return Ok(true);
-        }
+    {
+        return Ok(true);
     }
 
     match cx
@@ -1744,66 +1766,6 @@ async fn restore_local_superzent_startup_workspace(
     app_state: Arc<AppState>,
     cx: &mut AsyncApp,
 ) -> Result<bool> {
-    let session_handle = app_state.session.clone();
-    let (last_session_id, last_session_window_stack) = cx.update(|cx| {
-        let session = session_handle.read(cx);
-        (
-            session.last_session_id().map(|id| id.to_string()),
-            session.last_session_window_stack(),
-        )
-    });
-
-    if let Some(last_session_id) = last_session_id
-        && let Some(session_workspaces) = workspace::last_session_workspace_locations(
-            &last_session_id,
-            last_session_window_stack,
-            app_state.fs.as_ref(),
-        )
-        .await
-        && let Some(matching_workspace) = session_workspaces.iter().find(|session_workspace| {
-            matches!(
-                session_workspace.location,
-                SerializedWorkspaceLocation::Local
-            ) && session_workspace
-                .paths
-                .paths()
-                .iter()
-                .any(|path| path == &worktree_path)
-        })
-    {
-        let matching_group = if let Some(window_id) = matching_workspace.window_id {
-            session_workspaces
-                .into_iter()
-                .filter(|session_workspace| session_workspace.window_id == Some(window_id))
-                .collect::<Vec<_>>()
-        } else {
-            vec![matching_workspace.clone()]
-        };
-
-        if let Some(serialized_multi_workspace) =
-            workspace::read_serialized_multi_workspaces(matching_group)
-                .into_iter()
-                .next()
-        {
-            match restore_multiworkspace(serialized_multi_workspace, app_state.clone(), cx).await {
-                Ok(result) => {
-                    for error in result.errors {
-                        log::error!("Failed to restore startup workspace group item: {error:#}");
-                    }
-                    cx.update(|cx| {
-                        store.update(cx, |store: &mut superzent_model::SuperzentStore, cx| {
-                            store.record_workspace_opened(&workspace_id, cx);
-                        });
-                    });
-                    return Ok(true);
-                }
-                Err(error) => {
-                    log::error!("Failed to restore startup workspace group: {error:#}");
-                }
-            }
-        }
-    }
-
     match cx
         .update(|cx| {
             workspace::Workspace::new_local(

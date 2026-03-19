@@ -6320,4 +6320,264 @@ mod tests {
             "restored active workspace should match one of the previously active workspaces, got {active_paths:?}"
         );
     }
+
+    #[gpui::test]
+    async fn test_superzent_startup_restores_only_startup_workspace(
+        cx: &mut TestAppContext,
+    ) {
+        use session::Session;
+        use workspace::Workspace;
+
+        let app_state = init_superzent_test(cx);
+
+        let dir1 = path!("/dir1");
+        let dir2 = path!("/dir2");
+
+        let fs = app_state.fs.clone();
+        let fake_fs = fs.as_fake();
+        fake_fs.insert_tree(dir1, json!({})).await;
+        fake_fs.insert_tree(dir2, json!({})).await;
+
+        let session_id = cx.read(|cx| app_state.session.read(cx).id().to_owned());
+
+        let (window, _) = cx
+            .update(|cx| {
+                Workspace::new_local(
+                    vec![dir1.into()],
+                    app_state.clone(),
+                    None,
+                    None,
+                    None,
+                    true,
+                    cx,
+                )
+            })
+            .await
+            .expect("failed to open first workspace");
+
+        window
+            .update(cx, |multi_workspace, window, cx| {
+                multi_workspace.open_project(vec![dir2.into()], window, cx)
+            })
+            .unwrap()
+            .await
+            .expect("failed to open second workspace into the same window");
+        cx.run_until_parked();
+
+        cx.update(|cx| {
+            let store = superzent_model::SuperzentStore::global(cx);
+            store.update(cx, |store, cx| {
+                store.set_active_workspace_by_path(Path::new(dir1), cx);
+            });
+        });
+
+        let startup_workspace_path = cx.update(|cx| {
+            let store = superzent_model::SuperzentStore::global(cx);
+            store
+                .read(cx)
+                .startup_workspace()
+                .and_then(|workspace| workspace.local_worktree_path())
+                .map(Path::to_path_buf)
+        });
+        assert_eq!(
+            startup_workspace_path.as_deref(),
+            Some(Path::new(dir1)),
+            "startup workspace should point at the most recently selected workspace"
+        );
+
+        cx.executor().advance_clock(SERIALIZATION_THROTTLE_TIME);
+        cx.run_until_parked();
+
+        let locations = workspace::last_session_workspace_locations(&session_id, None, fs.as_ref())
+            .await
+            .expect("expected session workspace locations");
+        assert_eq!(locations.len(), 2, "expected both workspaces to be serialized");
+
+        window
+            .update(cx, |_, window, _| window.remove_window())
+            .unwrap();
+        cx.run_until_parked();
+
+        cx.update(|cx| {
+            app_state.session.update(cx, |app_session, _cx| {
+                app_session
+                    .replace_session_for_test(Session::test_with_old_session(session_id.clone()));
+            });
+        });
+
+        let mut async_cx = cx.to_async();
+        crate::restore_or_create_workspace(app_state.clone(), &mut async_cx)
+            .await
+            .expect("failed to restore startup workspace");
+        cx.run_until_parked();
+
+        let restored_windows: Vec<WindowHandle<MultiWorkspace>> = cx.read(|cx| {
+            cx.windows()
+                .into_iter()
+                .filter_map(|window| window.downcast::<MultiWorkspace>())
+                .collect()
+        });
+        assert_eq!(restored_windows.len(), 1, "expected a single restored window");
+
+        let dir1_path: Arc<Path> = Path::new(dir1).into();
+        let dir2_path: Arc<Path> = Path::new(dir2).into();
+
+        let restored_paths = restored_windows[0]
+            .read_with(cx, |multi_workspace, cx| {
+                multi_workspace
+                    .workspaces()
+                    .iter()
+                    .map(|workspace| workspace.read(cx).root_paths(cx))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap();
+
+        assert_eq!(
+            restored_paths.len(),
+            1,
+            "startup restore should eagerly open only one workspace, got {restored_paths:?}"
+        );
+        assert!(
+            restored_paths[0].contains(&dir1_path),
+            "restored workspace should contain the startup path, got {restored_paths:?}"
+        );
+        assert!(
+            !restored_paths[0].contains(&dir2_path),
+            "non-startup workspace should remain unopened at launch, got {restored_paths:?}"
+        );
+    }
+
+    #[gpui::test]
+    async fn test_superzent_startup_falls_back_to_latest_local_workspace(
+        cx: &mut TestAppContext,
+    ) {
+        use chrono::{Duration, Utc};
+        use superzent_model::{
+            ProjectEntry, ProjectLocation, SuperzentStore, WorkspaceAttentionStatus, WorkspaceEntry,
+            WorkspaceGitStatus, WorkspaceKind, WorkspaceLocation,
+        };
+
+        let app_state = init_superzent_test(cx);
+
+        let stale_dir = PathBuf::from("/stale");
+        let unique_seed = Utc::now().timestamp_nanos_opt().unwrap_or_default();
+        let older_dir =
+            std::env::temp_dir().join(format!("superzent-startup-fallback-older-{unique_seed}"));
+        let newer_dir =
+            std::env::temp_dir().join(format!("superzent-startup-fallback-newer-{unique_seed}"));
+        std::fs::create_dir_all(&older_dir).expect("failed to create older dir");
+        std::fs::create_dir_all(&newer_dir).expect("failed to create newer dir");
+
+        let fake_fs = app_state.fs.as_fake();
+        fake_fs.insert_tree(&older_dir, json!({})).await;
+        fake_fs.insert_tree(&newer_dir, json!({})).await;
+
+        let now = Utc::now();
+        let older_opened_at = now - Duration::minutes(20);
+        let newer_opened_at = now - Duration::minutes(5);
+        let stale_opened_at = now;
+
+        cx.update(|cx| {
+            let store = SuperzentStore::global(cx);
+            store.update(cx, |store, cx| {
+                for (project_id, repo_root, opened_at) in [
+                    ("stale-project", stale_dir.clone(), stale_opened_at),
+                    ("older-project", older_dir.clone(), older_opened_at),
+                    ("newer-project", newer_dir.clone(), newer_opened_at),
+                ] {
+                    store.upsert_project(
+                        ProjectEntry {
+                            id: project_id.to_string(),
+                            name: project_id.to_string(),
+                            location: ProjectLocation::Local { repo_root },
+                            collapsed: false,
+                            created_at: opened_at,
+                            last_opened_at: opened_at,
+                        },
+                        cx,
+                    );
+                }
+
+                for (workspace_id, project_id, worktree_path, opened_at) in [
+                    (
+                        "stale-workspace",
+                        "stale-project",
+                        stale_dir.clone(),
+                        stale_opened_at,
+                    ),
+                    (
+                        "older-workspace",
+                        "older-project",
+                        older_dir.clone(),
+                        older_opened_at,
+                    ),
+                    (
+                        "newer-workspace",
+                        "newer-project",
+                        newer_dir.clone(),
+                        newer_opened_at,
+                    ),
+                ] {
+                    store.upsert_workspace(
+                        WorkspaceEntry {
+                            id: workspace_id.to_string(),
+                            project_id: project_id.to_string(),
+                            kind: WorkspaceKind::Primary,
+                            name: workspace_id.to_string(),
+                            display_name: None,
+                            branch: "main".to_string(),
+                            location: WorkspaceLocation::Local { worktree_path },
+                            agent_preset_id: "codex".to_string(),
+                            managed: false,
+                            git_status: WorkspaceGitStatus::Available,
+                            git_summary: None,
+                            attention_status: WorkspaceAttentionStatus::Idle,
+                            review_pending: false,
+                            last_attention_reason: None,
+                            created_at: opened_at,
+                            last_opened_at: opened_at,
+                        },
+                        cx,
+                    );
+                }
+
+                store.set_active_workspace(Some("stale-workspace"), cx);
+            });
+        });
+
+        let mut async_cx = cx.to_async();
+        crate::restore_or_create_workspace(app_state.clone(), &mut async_cx)
+            .await
+            .expect("failed to restore startup workspace");
+        cx.run_until_parked();
+
+        let restored_windows: Vec<WindowHandle<MultiWorkspace>> = cx.read(|cx| {
+            cx.windows()
+                .into_iter()
+                .filter_map(|window| window.downcast::<MultiWorkspace>())
+                .collect()
+        });
+        assert_eq!(restored_windows.len(), 1, "expected a single restored window");
+
+        let newer_dir: Arc<Path> = newer_dir.into();
+        let restored_paths = restored_windows[0]
+            .read_with(cx, |multi_workspace, cx| {
+                multi_workspace
+                    .workspaces()
+                    .iter()
+                    .map(|workspace| workspace.read(cx).root_paths(cx))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap();
+
+        assert_eq!(
+            restored_paths.len(),
+            1,
+            "fallback startup restore should open one local workspace, got {restored_paths:?}"
+        );
+        assert!(
+            restored_paths[0].contains(&newer_dir),
+            "fallback startup restore should prefer the most recently opened local workspace, got {restored_paths:?}"
+        );
+    }
 }
