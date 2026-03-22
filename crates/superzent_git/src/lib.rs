@@ -868,7 +868,12 @@ mod tests {
 
         git(
             remote_path.parent().unwrap(),
-            &["init", "--bare", remote_path.to_str().unwrap()],
+            &[
+                "init",
+                "--bare",
+                "--initial-branch=main",
+                remote_path.to_str().unwrap(),
+            ],
         );
         git(
             &repo.repo_path,
@@ -883,8 +888,6 @@ mod tests {
             repo.repo_path.parent().unwrap(),
             &[
                 "clone",
-                "--branch",
-                "main",
                 remote_path.to_str().unwrap(),
                 other_clone_path.to_str().unwrap(),
             ],
