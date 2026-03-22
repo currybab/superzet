@@ -10,6 +10,11 @@
 
 One window, multiple local workspaces with git worktree, fast file navigation, diff views, terminal-heavy agent workflows, and center-pane ACP chat tabs.
 
+## Why superzent
+
+- Compared with upstream Zed: more opinionated around managing multiple local projects and workspaces in one window, especially for git-worktree-heavy flows, with external ACP chats treated as a first-class center-pane workflow.
+- Compared with `superset.sh`: keeps a native editor in the loop, with language-server-backed navigation, diagnostics, and quick in-place edits alongside terminal agent workflows.
+
 ## Status
 
 This repository is in early alpha.
@@ -94,6 +99,7 @@ For a signed macOS bundle:
 
 - Extensions still use the upstream Zed marketplace.
 - Much of the editor and platform code still comes from upstream Zed and is intentionally kept close for easier maintenance.
+- This repository is regularly synced with upstream Zed, so GitHub contributor counts and graphs may include upstream contributors alongside superzent-specific work.
 - The default app build is `lite + acp_tabs`.
 - `superzent` reuses selected ACP / `agent_ui` pieces to open external ACP chats in center-pane tabs.
 - That does not mean bringing back Zed's own docked agent panel, native text-thread surface, or hosted AI product flow in the default build.
