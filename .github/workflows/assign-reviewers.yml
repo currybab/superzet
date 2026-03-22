@@ -21,11 +21,15 @@ on:
 # Declare minimal permissions so the default token has no write access.
 permissions: {}
 
-# Only run for PRs from within the org (not forks) — fork PRs don't have
-# write access to request team reviewers.
+# Keep this workflow file for easier upstream sync, but hard-disable it outside
+# zed-industries/zed. It depends on zed-industries GitHub App credentials and
+# the private codeowner-coordinator repo, so forks would just fail noisily.
+# Within the upstream repo, only run for PRs from the same repo (not forks) —
+# fork PRs don't have write access to request team reviewers.
 jobs:
   assign-reviewers:
     if: >-
+      github.repository == 'zed-industries/zed' &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       github.event.pull_request.draft == false &&
       contains(fromJSON('["MEMBER", "OWNER"]'), github.event.pull_request.author_association)
