@@ -76,8 +76,9 @@ use ui::{
 };
 use uuid::Uuid;
 use workspace::{
-    AppState as WorkspaceAppState, ModalView, MultiWorkspace, MultiWorkspaceEvent, OpenOptions,
-    Pane, SerializedWorkspaceLocation, Sidebar as WorkspaceSidebar, SidebarEvent, Toast, Workspace,
+    AppState as WorkspaceAppState, ModalView, MultiWorkspace, MultiWorkspaceEvent,
+    NextWorkspaceInWindow, OpenOptions, Pane, PreviousWorkspaceInWindow,
+    SerializedWorkspaceLocation, Sidebar as WorkspaceSidebar, SidebarEvent, Toast, Workspace,
     dock::{DockPosition, Panel, PanelEvent},
     notifications::NotificationId,
     workspace_windows_for_location,
@@ -679,6 +680,20 @@ pub fn init(cx: &mut App) {
                 })
                 .register_action(|workspace, _: &DeleteWorkspace, window, cx| {
                     run_delete_workspace(workspace, window, cx);
+                })
+                .register_action(|_, _: &NextWorkspaceInWindow, window, cx| {
+                    cycle_workspace_in_window_from_window(
+                        WorkspaceSwitchDirection::Forward,
+                        window,
+                        cx,
+                    );
+                })
+                .register_action(|_, _: &PreviousWorkspaceInWindow, window, cx| {
+                    cycle_workspace_in_window_from_window(
+                        WorkspaceSwitchDirection::Backward,
+                        window,
+                        cx,
+                    );
                 });
         },
     )
@@ -2082,6 +2097,49 @@ pub fn open_workspace_in_new_window_from_window(window: &mut gpui::Window, cx: &
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum WorkspaceSwitchDirection {
+    Forward,
+    Backward,
+}
+
+fn cycle_workspace_in_window_from_window<T: 'static>(
+    direction: WorkspaceSwitchDirection,
+    window: &mut Window,
+    cx: &mut Context<T>,
+) {
+    window.defer(cx, move |window, cx| {
+        let Some(multi_workspace) = window.root::<MultiWorkspace>().flatten() else {
+            return;
+        };
+
+        let Some(next_index) = multi_workspace.read_with(cx, |multi_workspace, _cx| {
+            let workspace_count = multi_workspace.workspaces().len();
+            if workspace_count <= 1 {
+                return None;
+            }
+
+            let active_index = multi_workspace.active_workspace_index();
+            Some(match direction {
+                WorkspaceSwitchDirection::Forward => (active_index + 1) % workspace_count,
+                WorkspaceSwitchDirection::Backward => {
+                    if active_index == 0 {
+                        workspace_count - 1
+                    } else {
+                        active_index - 1
+                    }
+                }
+            })
+        }) else {
+            return;
+        };
+
+        multi_workspace.update(cx, |multi_workspace, cx| {
+            multi_workspace.activate_index(next_index, window, cx);
+        });
+    });
+}
+
 #[derive(Clone, Debug)]
 struct DraggedWorkspaceRow {
     workspace_id: String,
@@ -2122,7 +2180,7 @@ pub struct SuperzentSidebar {
     width: Option<Pixels>,
     deleting_workspace_ids: BTreeSet<String>,
     context_menu: Option<(Entity<ContextMenu>, Point<Pixels>, Subscription)>,
-    rename_workspace_id: Option<String>,
+    rename_project_id: Option<String>,
     rename_editor: Option<Entity<Editor>>,
     rename_editor_subscription: Option<Subscription>,
     _git_store_subscriptions: Vec<Subscription>,
@@ -2167,7 +2225,7 @@ impl SuperzentSidebar {
             width: None,
             deleting_workspace_ids: BTreeSet::new(),
             context_menu: None,
-            rename_workspace_id: None,
+            rename_project_id: None,
             rename_editor: None,
             rename_editor_subscription: None,
             _git_store_subscriptions: Vec::new(),
@@ -2320,29 +2378,29 @@ impl SuperzentSidebar {
             .map(|multi_workspace| multi_workspace.read(cx).workspace().clone())
     }
 
-    fn is_renaming_workspace(&self, workspace_id: &str) -> bool {
-        self.rename_workspace_id.as_deref() == Some(workspace_id)
+    fn is_renaming_project(&self, project_id: &str) -> bool {
+        self.rename_project_id.as_deref() == Some(project_id)
     }
 
-    fn begin_workspace_rename(
+    fn begin_project_rename(
         &mut self,
-        workspace_id: &str,
+        project_id: &str,
         window: &mut gpui::Window,
         cx: &mut Context<Self>,
     ) {
-        if self.is_renaming_workspace(workspace_id) {
+        if self.is_renaming_project(project_id) {
             return;
         }
 
         if self.rename_editor.is_some() {
-            self.finish_workspace_rename(true, window, cx);
+            self.finish_project_rename(true, window, cx);
         }
 
         let Some(current_label) = self
             .store
             .read(cx)
-            .workspace(workspace_id)
-            .map(|workspace| workspace.display_name().to_string())
+            .project(project_id)
+            .map(|project| project.name.clone())
         else {
             return;
         };
@@ -2359,14 +2417,15 @@ impl SuperzentSidebar {
                             .as_ref()
                             .is_some_and(|current| current == &rename_editor);
                         if still_current && !rename_editor.focus_handle(cx).is_focused(window) {
-                            this.finish_workspace_rename(true, window, cx);
+                            this.finish_project_rename(true, window, cx);
                         }
                     });
                 }
             }
         });
 
-        self.rename_workspace_id = Some(workspace_id.to_string());
+        self.context_menu.take();
+        self.rename_project_id = Some(project_id.to_string());
         self.rename_editor = Some(rename_editor.clone());
         self.rename_editor_subscription = Some(rename_editor_subscription);
 
@@ -2378,23 +2437,23 @@ impl SuperzentSidebar {
         cx.notify();
     }
 
-    fn finish_workspace_rename(
+    fn finish_project_rename(
         &mut self,
         save: bool,
         window: &mut gpui::Window,
         cx: &mut Context<Self>,
     ) {
-        let workspace_id = self.rename_workspace_id.take();
+        let project_id = self.rename_project_id.take();
         let editor = self.rename_editor.take();
         self.rename_editor_subscription = None;
 
-        if save
-            && let (Some(workspace_id), Some(editor)) = (workspace_id.as_deref(), editor.as_ref())
-        {
+        if save && let (Some(project_id), Some(editor)) = (project_id.as_deref(), editor.as_ref()) {
             let label = editor.read(cx).text(cx).trim().to_string();
-            self.store.update(cx, |store, cx| {
-                store.set_workspace_display_name(workspace_id, Some(label), cx);
-            });
+            if !label.is_empty() {
+                self.store.update(cx, |store, cx| {
+                    store.set_project_name(project_id, label, cx);
+                });
+            }
         }
 
         self.focus_handle.focus(window, cx);
@@ -2429,6 +2488,24 @@ impl SuperzentSidebar {
         });
     }
 
+    fn open_next_workspace_switcher(
+        &mut self,
+        _: &NextWorkspaceInWindow,
+        window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) {
+        cycle_workspace_in_window_from_window(WorkspaceSwitchDirection::Forward, window, cx);
+    }
+
+    fn open_previous_workspace_switcher(
+        &mut self,
+        _: &PreviousWorkspaceInWindow,
+        window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) {
+        cycle_workspace_in_window_from_window(WorkspaceSwitchDirection::Backward, window, cx);
+    }
+
     fn move_workspace(
         &mut self,
         dragged: &DraggedWorkspaceRow,
@@ -2459,45 +2536,6 @@ impl SuperzentSidebar {
         });
     }
 
-    fn deploy_workspace_context_menu(
-        &mut self,
-        position: Point<Pixels>,
-        workspace: WorkspaceEntry,
-        window: &mut gpui::Window,
-        cx: &mut Context<Self>,
-    ) {
-        let entity = cx.entity();
-        let context_menu = ContextMenu::build(window, cx, move |menu, _, _| {
-            menu.entry("Rename Workspace", None, {
-                let entity = entity.clone();
-                let workspace_id = workspace.id;
-                move |window, cx| {
-                    entity.update(cx, |this, cx| {
-                        this.begin_workspace_rename(&workspace_id, window, cx);
-                    });
-                }
-            })
-        });
-
-        window.focus(&context_menu.focus_handle(cx), cx);
-        let subscription = cx.subscribe_in(
-            &context_menu,
-            window,
-            |this, _, _: &DismissEvent, window, cx| {
-                if this.context_menu.as_ref().is_some_and(|context_menu| {
-                    context_menu.0.focus_handle(cx).contains_focused(window, cx)
-                }) {
-                    cx.focus_self(window);
-                }
-                this.context_menu.take();
-                cx.notify();
-            },
-        );
-
-        self.context_menu = Some((context_menu, position, subscription));
-        cx.notify();
-    }
-
     fn deploy_project_context_menu(
         &mut self,
         position: Point<Pixels>,
@@ -2521,9 +2559,19 @@ impl SuperzentSidebar {
                 });
             }
 
+            menu = menu.entry("Rename Project", None, {
+                let entity = entity.clone();
+                let project_id = project.id.clone();
+                move |window, cx| {
+                    entity.update(cx, |this, cx| {
+                        this.begin_project_rename(&project_id, window, cx);
+                    });
+                }
+            });
+
             menu.entry("Close Project", None, {
                 let entity = entity.clone();
-                let project_id = project.id;
+                let project_id = project.id.clone();
                 move |window, cx| {
                     entity.update(cx, |this, cx| {
                         this.close_project(&project_id, window, cx);
@@ -2753,11 +2801,7 @@ impl SuperzentSidebar {
                                     .justify_center()
                                     .gap_0p5()
                                     .min_w_0()
-                                    .child(
-                                        Label::new(project.name.clone())
-                                            .size(LabelSize::Small)
-                                            .truncate(),
-                                    )
+                                    .child(self.render_project_title(project, cx))
                                     .child(
                                         Label::new(project.display_root())
                                             .size(LabelSize::XSmall)
@@ -2792,7 +2836,6 @@ impl SuperzentSidebar {
         let attention_status = workspace.attention_status.clone();
         let workspace_for_open = workspace.clone();
         let workspace_for_delete = workspace.clone();
-        let workspace_for_menu = workspace.clone();
         let dragged_workspace = DraggedWorkspaceRow {
             workspace_id: workspace.id.clone(),
             project_id: workspace.project_id.clone(),
@@ -2887,16 +2930,6 @@ impl SuperzentSidebar {
                                 let path = workspace.display_path();
                                 move |window, cx| ui::Tooltip::text(path.clone())(window, cx)
                             })
-                            .on_secondary_mouse_down(cx.listener(
-                                move |this, event: &MouseDownEvent, window, cx| {
-                                    this.deploy_workspace_context_menu(
-                                        event.position,
-                                        workspace_for_menu.clone(),
-                                        window,
-                                        cx,
-                                    );
-                                },
-                            ))
                             .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                                 this.store.update(cx, |store, cx| {
                                     store.record_workspace_opened(&workspace_for_open.id, cx);
@@ -2957,12 +2990,12 @@ impl SuperzentSidebar {
             )
     }
 
-    fn render_workspace_title(
+    fn render_project_title(
         &self,
-        workspace: &WorkspaceEntry,
+        project: &ProjectEntry,
         cx: &mut Context<Self>,
     ) -> gpui::AnyElement {
-        if self.is_renaming_workspace(&workspace.id)
+        if self.is_renaming_project(&project.id)
             && let Some(editor) = self.rename_editor.clone()
         {
             return div()
@@ -2975,15 +3008,26 @@ impl SuperzentSidebar {
                         .w_full()
                         .child(editor)
                         .on_action(cx.listener(move |this, _: &menu::Confirm, window, cx| {
-                            this.finish_workspace_rename(true, window, cx);
+                            this.finish_project_rename(true, window, cx);
                         }))
                         .on_action(cx.listener(move |this, _: &menu::Cancel, window, cx| {
-                            this.finish_workspace_rename(false, window, cx);
+                            this.finish_project_rename(false, window, cx);
                         })),
                 )
                 .into_any_element();
         }
 
+        Label::new(project.name.clone())
+            .size(LabelSize::Small)
+            .truncate()
+            .into_any_element()
+    }
+
+    fn render_workspace_title(
+        &self,
+        workspace: &WorkspaceEntry,
+        _cx: &mut Context<Self>,
+    ) -> gpui::AnyElement {
         match workspace.kind {
             WorkspaceKind::Primary => Label::new(workspace_display_name(workspace))
                 .size(LabelSize::Small)
@@ -3318,6 +3362,8 @@ impl Render for SuperzentSidebar {
             .track_focus(&self.focus_handle)
             .on_action(cx.listener(Self::expand_workspace_section))
             .on_action(cx.listener(Self::collapse_workspace_section))
+            .on_action(cx.listener(Self::open_next_workspace_switcher))
+            .on_action(cx.listener(Self::open_previous_workspace_switcher))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .size_full()
             .bg(cx.theme().colors().panel_background)

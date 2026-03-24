@@ -125,6 +125,7 @@ impl<T: Sidebar> SidebarHandle for Entity<T> {
 pub struct MultiWorkspace {
     window_id: WindowId,
     workspaces: Vec<Entity<Workspace>>,
+    workspace_usage_order: Vec<EntityId>,
     active_workspace_index: usize,
     sidebar: Option<Box<dyn SidebarHandle>>,
     sidebar_open: bool,
@@ -138,6 +139,7 @@ impl EventEmitter<MultiWorkspaceEvent> for MultiWorkspace {}
 
 impl MultiWorkspace {
     pub fn new(workspace: Entity<Workspace>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let workspace_id = workspace.entity_id();
         let release_subscription = cx.on_release(|this: &mut MultiWorkspace, _cx| {
             if let Some(task) = this._serialize_task.take() {
                 task.detach();
@@ -153,6 +155,7 @@ impl MultiWorkspace {
         Self {
             window_id: window.window_handle().window_id(),
             workspaces: vec![workspace],
+            workspace_usage_order: vec![workspace_id],
             active_workspace_index: 0,
             sidebar: None,
             sidebar_open: true,
@@ -329,10 +332,38 @@ impl MultiWorkspace {
         self.active_workspace_index
     }
 
+    pub fn workspaces_by_recent_use(&self) -> Vec<Entity<Workspace>> {
+        let mut ordered_workspaces = Vec::with_capacity(self.workspaces.len());
+
+        for workspace_id in &self.workspace_usage_order {
+            if let Some(workspace) = self
+                .workspaces
+                .iter()
+                .find(|workspace| workspace.entity_id() == *workspace_id)
+            {
+                ordered_workspaces.push(workspace.clone());
+            }
+        }
+
+        for workspace in &self.workspaces {
+            if ordered_workspaces
+                .iter()
+                .any(|ordered_workspace| ordered_workspace == workspace)
+            {
+                continue;
+            }
+
+            ordered_workspaces.push(workspace.clone());
+        }
+
+        ordered_workspaces
+    }
+
     pub fn activate(&mut self, workspace: Entity<Workspace>, cx: &mut Context<Self>) {
         if !self.multi_workspace_enabled(cx) {
             self.workspaces[0] = workspace;
             self.active_workspace_index = 0;
+            self.record_workspace_usage(self.workspaces[0].entity_id());
             cx.emit(MultiWorkspaceEvent::ActiveWorkspaceChanged);
             cx.notify();
             return;
@@ -353,6 +384,7 @@ impl MultiWorkspace {
         let index = self.add_workspace(workspace, cx);
         let changed = self.active_workspace_index != index;
         self.active_workspace_index = index;
+        self.record_workspace_usage(self.workspaces[index].entity_id());
         if changed {
             cx.emit(MultiWorkspaceEvent::ActiveWorkspaceChanged);
         }
@@ -364,6 +396,7 @@ impl MultiWorkspace {
     /// Returns the index of the workspace (existing or newly inserted).
     pub fn add_workspace(&mut self, workspace: Entity<Workspace>, cx: &mut Context<Self>) -> usize {
         if let Some(index) = self.workspaces.iter().position(|w| *w == workspace) {
+            self.record_workspace_usage(self.workspaces[index].entity_id());
             index
         } else {
             if self.sidebar_open {
@@ -373,6 +406,7 @@ impl MultiWorkspace {
             }
             Self::subscribe_to_workspace(&workspace, cx);
             self.workspaces.push(workspace.clone());
+            self.record_workspace_usage(workspace.entity_id());
             cx.emit(MultiWorkspaceEvent::WorkspaceAdded(workspace));
             cx.notify();
             self.workspaces.len() - 1
@@ -403,6 +437,9 @@ impl MultiWorkspace {
         let removed_workspace =
             std::mem::replace(&mut self.workspaces[index], new_workspace.clone());
         self.active_workspace_index = index;
+        self.remove_workspace_from_usage_order(removed_workspace.entity_id());
+        self.record_workspace_usage(new_workspace.entity_id());
+        self.sync_workspace_usage_order();
         self.serialize(cx);
         cx.emit(MultiWorkspaceEvent::WorkspaceRemoved(
             removed_workspace.entity_id(),
@@ -420,6 +457,7 @@ impl MultiWorkspace {
         );
         let changed = self.active_workspace_index != index;
         self.active_workspace_index = index;
+        self.record_workspace_usage(self.workspaces[index].entity_id());
         self.serialize(cx);
         self.focus_active_workspace(window, cx);
         if changed {
@@ -636,12 +674,19 @@ impl MultiWorkspace {
         }
 
         let removed_workspace = self.workspaces.remove(index);
+        self.remove_workspace_from_usage_order(removed_workspace.entity_id());
 
         if self.active_workspace_index >= self.workspaces.len() {
             self.active_workspace_index = self.workspaces.len() - 1;
         } else if self.active_workspace_index > index {
             self.active_workspace_index -= 1;
         }
+
+        if let Some(active_workspace) = self.workspaces.get(self.active_workspace_index) {
+            self.record_workspace_usage(active_workspace.entity_id());
+        }
+
+        self.sync_workspace_usage_order();
 
         if let Some(workspace_id) = removed_workspace.read(cx).database_id() {
             self.pending_removal_tasks.retain(|task| !task.is_ready());
@@ -694,6 +739,37 @@ impl MultiWorkspace {
                     Ok(())
                 }
             })
+        }
+    }
+
+    fn record_workspace_usage(&mut self, workspace_id: EntityId) {
+        self.workspace_usage_order
+            .retain(|existing_id| *existing_id != workspace_id);
+        self.workspace_usage_order.insert(0, workspace_id);
+    }
+
+    fn remove_workspace_from_usage_order(&mut self, workspace_id: EntityId) {
+        self.workspace_usage_order
+            .retain(|existing_id| *existing_id != workspace_id);
+    }
+
+    fn sync_workspace_usage_order(&mut self) {
+        self.workspace_usage_order.retain(|workspace_id| {
+            self.workspaces
+                .iter()
+                .any(|workspace| workspace.entity_id() == *workspace_id)
+        });
+
+        for workspace in &self.workspaces {
+            if self
+                .workspace_usage_order
+                .iter()
+                .any(|workspace_id| *workspace_id == workspace.entity_id())
+            {
+                continue;
+            }
+
+            self.workspace_usage_order.push(workspace.entity_id());
         }
     }
 }
@@ -836,6 +912,19 @@ mod tests {
         });
     }
 
+    fn recent_workspace_ids(
+        multi_workspace: &Entity<MultiWorkspace>,
+        cx: &TestAppContext,
+    ) -> Vec<EntityId> {
+        multi_workspace.read_with(cx, |multi_workspace, _cx| {
+            multi_workspace
+                .workspaces_by_recent_use()
+                .into_iter()
+                .map(|workspace| workspace.entity_id())
+                .collect::<Vec<_>>()
+        })
+    }
+
     #[gpui::test]
     async fn test_sidebar_disabled_when_disable_ai_is_enabled(cx: &mut TestAppContext) {
         init_test(cx);
@@ -905,5 +994,91 @@ mod tests {
                 "Sidebar should open when toggled after re-enabling AI"
             );
         });
+    }
+
+    #[gpui::test]
+    async fn test_workspaces_by_recent_use_tracks_activation_order(cx: &mut TestAppContext) {
+        init_test(cx);
+        let fs = FakeFs::new(cx.executor());
+        let project_a = Project::test(fs.clone(), [], cx).await;
+        let project_b = Project::test(fs.clone(), [], cx).await;
+        let project_c = Project::test(fs, [], cx).await;
+
+        let (multi_workspace, cx) =
+            cx.add_window_view(|window, cx| MultiWorkspace::test_new(project_a, window, cx));
+
+        let workspace_a = multi_workspace.read_with(cx, |multi_workspace, _cx| {
+            multi_workspace.workspace().clone()
+        });
+        let workspace_b = multi_workspace.update_in(cx, |multi_workspace, window, cx| {
+            multi_workspace.test_add_workspace(project_b, window, cx)
+        });
+        let workspace_c = multi_workspace.update_in(cx, |multi_workspace, window, cx| {
+            multi_workspace.test_add_workspace(project_c, window, cx)
+        });
+
+        assert_eq!(
+            recent_workspace_ids(&multi_workspace, cx),
+            vec![
+                workspace_c.entity_id(),
+                workspace_b.entity_id(),
+                workspace_a.entity_id()
+            ]
+        );
+
+        multi_workspace.update_in(cx, |multi_workspace, _window, cx| {
+            multi_workspace.activate(workspace_a.clone(), cx);
+        });
+        assert_eq!(
+            recent_workspace_ids(&multi_workspace, cx),
+            vec![
+                workspace_a.entity_id(),
+                workspace_c.entity_id(),
+                workspace_b.entity_id()
+            ]
+        );
+
+        multi_workspace.update_in(cx, |multi_workspace, _window, cx| {
+            multi_workspace.activate(workspace_b.clone(), cx);
+        });
+        assert_eq!(
+            recent_workspace_ids(&multi_workspace, cx),
+            vec![
+                workspace_b.entity_id(),
+                workspace_a.entity_id(),
+                workspace_c.entity_id()
+            ]
+        );
+    }
+
+    #[gpui::test]
+    async fn test_workspaces_by_recent_use_removes_closed_workspaces(cx: &mut TestAppContext) {
+        init_test(cx);
+        let fs = FakeFs::new(cx.executor());
+        let project_a = Project::test(fs.clone(), [], cx).await;
+        let project_b = Project::test(fs.clone(), [], cx).await;
+        let project_c = Project::test(fs, [], cx).await;
+
+        let (multi_workspace, cx) =
+            cx.add_window_view(|window, cx| MultiWorkspace::test_new(project_a, window, cx));
+
+        let workspace_a = multi_workspace.read_with(cx, |multi_workspace, _cx| {
+            multi_workspace.workspace().clone()
+        });
+        let workspace_b = multi_workspace.update_in(cx, |multi_workspace, window, cx| {
+            multi_workspace.test_add_workspace(project_b, window, cx)
+        });
+        let workspace_c = multi_workspace.update_in(cx, |multi_workspace, window, cx| {
+            multi_workspace.test_add_workspace(project_c, window, cx)
+        });
+
+        multi_workspace.update_in(cx, |multi_workspace, window, cx| {
+            multi_workspace.remove_workspace(1, window, cx);
+        });
+        assert_eq!(
+            recent_workspace_ids(&multi_workspace, cx),
+            vec![workspace_c.entity_id(), workspace_a.entity_id()]
+        );
+        assert!(!recent_workspace_ids(&multi_workspace, cx).contains(&workspace_b.entity_id()));
     }
 }

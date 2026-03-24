@@ -807,6 +807,30 @@ impl SuperzentStore {
         }
     }
 
+    pub fn set_project_name(
+        &mut self,
+        project_id: &str,
+        name: impl AsRef<str>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(project) = self
+            .state
+            .projects
+            .iter_mut()
+            .find(|project| project.id == project_id)
+        else {
+            return;
+        };
+
+        let name = name.as_ref().trim();
+        if name.is_empty() || project.name == name {
+            return;
+        }
+
+        project.name = name.to_string();
+        self.persist_and_notify(cx);
+    }
+
     pub fn upsert_project(&mut self, project: ProjectEntry, cx: &mut Context<Self>) {
         if let Some(existing) = self
             .state
