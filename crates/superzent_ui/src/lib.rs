@@ -2663,7 +2663,7 @@ impl SuperzentSidebar {
         let context_menu = ContextMenu::build(window, cx, move |menu, _, _| {
             menu.entry("Rename Workspace", None, {
                 let entity = entity.clone();
-                let workspace_id = workspace.id.clone();
+                let workspace_id = workspace.id;
                 move |window, cx| {
                     entity.update(cx, |this, cx| {
                         this.begin_workspace_rename(&workspace_id, window, cx);
@@ -3024,7 +3024,7 @@ impl SuperzentSidebar {
                                 move |window, cx| ui::Tooltip::text(path.clone())(window, cx)
                             })
                             .on_secondary_mouse_down(cx.listener({
-                                let workspace = workspace_for_context_menu.clone();
+                                let workspace = workspace_for_context_menu;
                                 move |this, event: &MouseDownEvent, window, cx| {
                                     this.deploy_workspace_context_menu(
                                         event.position,
