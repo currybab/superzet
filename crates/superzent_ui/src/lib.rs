@@ -2137,6 +2137,12 @@ struct DraggedProjectRow {
     label: String,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum SidebarRenameTarget {
+    Project(String),
+    Workspace(String),
+}
+
 struct DraggedRowPreview {
     label: String,
 }
@@ -2164,7 +2170,7 @@ pub struct SuperzentSidebar {
     width: Option<Pixels>,
     deleting_workspace_ids: BTreeSet<String>,
     context_menu: Option<(Entity<ContextMenu>, Point<Pixels>, Subscription)>,
-    rename_project_id: Option<String>,
+    rename_target: Option<SidebarRenameTarget>,
     rename_editor: Option<Entity<Editor>>,
     rename_editor_subscription: Option<Subscription>,
     _git_store_subscriptions: Vec<Subscription>,
@@ -2209,7 +2215,7 @@ impl SuperzentSidebar {
             width: None,
             deleting_workspace_ids: BTreeSet::new(),
             context_menu: None,
-            rename_project_id: None,
+            rename_target: None,
             rename_editor: None,
             rename_editor_subscription: None,
             _git_store_subscriptions: Vec::new(),
@@ -2363,7 +2369,12 @@ impl SuperzentSidebar {
     }
 
     fn is_renaming_project(&self, project_id: &str) -> bool {
-        self.rename_project_id.as_deref() == Some(project_id)
+        self.rename_target.as_ref() == Some(&SidebarRenameTarget::Project(project_id.to_string()))
+    }
+
+    fn is_renaming_workspace(&self, workspace_id: &str) -> bool {
+        self.rename_target.as_ref()
+            == Some(&SidebarRenameTarget::Workspace(workspace_id.to_string()))
     }
 
     fn begin_project_rename(
@@ -2376,10 +2387,6 @@ impl SuperzentSidebar {
             return;
         }
 
-        if self.rename_editor.is_some() {
-            self.finish_project_rename(true, window, cx);
-        }
-
         let Some(current_label) = self
             .store
             .read(cx)
@@ -2388,6 +2395,52 @@ impl SuperzentSidebar {
         else {
             return;
         };
+
+        self.begin_rename(
+            SidebarRenameTarget::Project(project_id.to_string()),
+            current_label,
+            window,
+            cx,
+        );
+    }
+
+    fn begin_workspace_rename(
+        &mut self,
+        workspace_id: &str,
+        window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.is_renaming_workspace(workspace_id) {
+            return;
+        }
+
+        let Some(current_label) = self
+            .store
+            .read(cx)
+            .workspace(workspace_id)
+            .map(workspace_sidebar_title)
+        else {
+            return;
+        };
+
+        self.begin_rename(
+            SidebarRenameTarget::Workspace(workspace_id.to_string()),
+            current_label,
+            window,
+            cx,
+        );
+    }
+
+    fn begin_rename(
+        &mut self,
+        target: SidebarRenameTarget,
+        current_label: String,
+        window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.rename_editor.is_some() {
+            self.finish_rename(true, window, cx);
+        }
 
         let rename_editor = cx.new(|cx| Editor::single_line(window, cx));
         let rename_editor_subscription = cx.subscribe_in(&rename_editor, window, {
@@ -2401,7 +2454,7 @@ impl SuperzentSidebar {
                             .as_ref()
                             .is_some_and(|current| current == &rename_editor);
                         if still_current && !rename_editor.focus_handle(cx).is_focused(window) {
-                            this.finish_project_rename(true, window, cx);
+                            this.finish_rename(true, window, cx);
                         }
                     });
                 }
@@ -2409,7 +2462,7 @@ impl SuperzentSidebar {
         });
 
         self.context_menu.take();
-        self.rename_project_id = Some(project_id.to_string());
+        self.rename_target = Some(target);
         self.rename_editor = Some(rename_editor.clone());
         self.rename_editor_subscription = Some(rename_editor_subscription);
 
@@ -2421,22 +2474,38 @@ impl SuperzentSidebar {
         cx.notify();
     }
 
-    fn finish_project_rename(
-        &mut self,
-        save: bool,
-        window: &mut gpui::Window,
-        cx: &mut Context<Self>,
-    ) {
-        let project_id = self.rename_project_id.take();
+    fn finish_rename(&mut self, save: bool, window: &mut gpui::Window, cx: &mut Context<Self>) {
+        let rename_target = self.rename_target.take();
         let editor = self.rename_editor.take();
         self.rename_editor_subscription = None;
 
-        if save && let (Some(project_id), Some(editor)) = (project_id.as_deref(), editor.as_ref()) {
+        if save
+            && let (Some(rename_target), Some(editor)) = (rename_target.as_ref(), editor.as_ref())
+        {
             let label = editor.read(cx).text(cx).trim().to_string();
-            if !label.is_empty() {
-                self.store.update(cx, |store, cx| {
-                    store.set_project_name(project_id, label, cx);
-                });
+            match rename_target {
+                SidebarRenameTarget::Project(project_id) => {
+                    if !label.is_empty() {
+                        self.store.update(cx, |store, cx| {
+                            store.set_project_name(project_id, label, cx);
+                        });
+                    }
+                }
+                SidebarRenameTarget::Workspace(workspace_id) => {
+                    let unchanged_visible_label = self
+                        .store
+                        .read(cx)
+                        .workspace(workspace_id)
+                        .is_some_and(|workspace| {
+                            workspace.display_name.is_none()
+                                && label == workspace_sidebar_title(workspace)
+                        });
+                    if !unchanged_visible_label {
+                        self.store.update(cx, |store, cx| {
+                            store.set_workspace_display_name(workspace_id, Some(label.clone()), cx);
+                        });
+                    }
+                }
             }
         }
 
@@ -2559,6 +2628,45 @@ impl SuperzentSidebar {
                 move |window, cx| {
                     entity.update(cx, |this, cx| {
                         this.close_project(&project_id, window, cx);
+                    });
+                }
+            })
+        });
+
+        window.focus(&context_menu.focus_handle(cx), cx);
+        let subscription = cx.subscribe_in(
+            &context_menu,
+            window,
+            |this, _, _: &DismissEvent, window, cx| {
+                if this.context_menu.as_ref().is_some_and(|context_menu| {
+                    context_menu.0.focus_handle(cx).contains_focused(window, cx)
+                }) {
+                    cx.focus_self(window);
+                }
+                this.context_menu.take();
+                cx.notify();
+            },
+        );
+
+        self.context_menu = Some((context_menu, position, subscription));
+        cx.notify();
+    }
+
+    fn deploy_workspace_context_menu(
+        &mut self,
+        position: Point<Pixels>,
+        workspace: WorkspaceEntry,
+        window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) {
+        let entity = cx.entity();
+        let context_menu = ContextMenu::build(window, cx, move |menu, _, _| {
+            menu.entry("Rename Workspace", None, {
+                let entity = entity.clone();
+                let workspace_id = workspace.id.clone();
+                move |window, cx| {
+                    entity.update(cx, |this, cx| {
+                        this.begin_workspace_rename(&workspace_id, window, cx);
                     });
                 }
             })
@@ -2820,6 +2928,7 @@ impl SuperzentSidebar {
         let attention_status = workspace.attention_status.clone();
         let workspace_for_open = workspace.clone();
         let workspace_for_delete = workspace.clone();
+        let workspace_for_context_menu = workspace.clone();
         let dragged_workspace = DraggedWorkspaceRow {
             workspace_id: workspace.id.clone(),
             project_id: workspace.project_id.clone(),
@@ -2914,6 +3023,17 @@ impl SuperzentSidebar {
                                 let path = workspace.display_path();
                                 move |window, cx| ui::Tooltip::text(path.clone())(window, cx)
                             })
+                            .on_secondary_mouse_down(cx.listener({
+                                let workspace = workspace_for_context_menu.clone();
+                                move |this, event: &MouseDownEvent, window, cx| {
+                                    this.deploy_workspace_context_menu(
+                                        event.position,
+                                        workspace.clone(),
+                                        window,
+                                        cx,
+                                    );
+                                }
+                            }))
                             .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                                 this.store.update(cx, |store, cx| {
                                     store.record_workspace_opened(&workspace_for_open.id, cx);
@@ -2992,10 +3112,10 @@ impl SuperzentSidebar {
                         .w_full()
                         .child(editor)
                         .on_action(cx.listener(move |this, _: &menu::Confirm, window, cx| {
-                            this.finish_project_rename(true, window, cx);
+                            this.finish_rename(true, window, cx);
                         }))
                         .on_action(cx.listener(move |this, _: &menu::Cancel, window, cx| {
-                            this.finish_project_rename(false, window, cx);
+                            this.finish_rename(false, window, cx);
                         })),
                 )
                 .into_any_element();
@@ -3010,8 +3130,30 @@ impl SuperzentSidebar {
     fn render_workspace_title(
         &self,
         workspace: &WorkspaceEntry,
-        _cx: &mut Context<Self>,
+        cx: &mut Context<Self>,
     ) -> gpui::AnyElement {
+        if self.is_renaming_workspace(&workspace.id)
+            && let Some(editor) = self.rename_editor.clone()
+        {
+            return div()
+                .flex_1()
+                .min_w_0()
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
+                .child(
+                    div()
+                        .w_full()
+                        .child(editor)
+                        .on_action(cx.listener(move |this, _: &menu::Confirm, window, cx| {
+                            this.finish_rename(true, window, cx);
+                        }))
+                        .on_action(cx.listener(move |this, _: &menu::Cancel, window, cx| {
+                            this.finish_rename(false, window, cx);
+                        })),
+                )
+                .into_any_element();
+        }
+
         match workspace.kind {
             WorkspaceKind::Primary => Label::new(workspace_display_name(workspace))
                 .size(LabelSize::Small)
